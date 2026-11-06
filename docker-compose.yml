@@ -1,0 +1,21 @@
+# Postgres para quando a hosfera sair do SQLite (ADR 0002).
+# O desenvolvimento atual roda sem container; suba isto só ao migrar.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hosfera
+      POSTGRES_USER: hosfera
+      POSTGRES_PASSWORD: hosfera
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hosfera -d hosfera']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
