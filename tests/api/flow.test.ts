@@ -7,10 +7,12 @@ import type { MockChannelAdapter } from '../../src/connectivity/adapters/mock.ts
 import { addDays, todayUtc } from '../../src/domain/dates.ts';
 import type { FastifyInstance } from 'fastify';
 
-const AUTH = { 'x-api-key': 'test-key' };
+const BOOTSTRAP = 'test-bootstrap';
 let db: Db;
 let app: FastifyInstance;
 let mock: MockChannelAdapter;
+let AUTH: Record<string, string> = {};
+let ORG_ID = '';
 
 const start = todayUtc();
 
@@ -27,12 +29,23 @@ before(async () => {
       port: 0,
       host: '127.0.0.1',
       databasePath: ':memory:',
-      authKey: 'test-key',
+      bootstrapKey: BOOTSTRAP,
       dispatcher: { intervalMs: 60_000, batchSize: 50, maxAttempts: 6, baseBackoffMs: 1000, maxBackoffMs: 60_000 },
       enableMockChannel: true,
     },
   });
   await app.ready();
+
+  const boot = await app.inject({
+    method: 'POST',
+    url: '/v1/bootstrap',
+    headers: { 'x-bootstrap-key': BOOTSTRAP },
+    payload: { orgName: 'Org Teste', userName: 'Operador Teste' },
+  });
+  assert.equal(boot.statusCode, 201, boot.body);
+  const body = boot.json() as { organization: { id: string }; token: string };
+  ORG_ID = body.organization.id;
+  AUTH = { authorization: `Bearer ${body.token}` };
 });
 
 after(async () => {
@@ -56,8 +69,8 @@ async function api<T>(method: string, url: string, payload?: unknown): Promise<T
 
 /** Monta o cenário base e devolve os ids usados nos testes. */
 async function scenario() {
-  const org = await api<{ id: string }>('POST', '/v1/organizations', { name: 'Org Teste' });
-  const property = await api<{ id: string }>('POST', '/v1/properties', { orgId: org.id, name: 'Casa Teste' });
+  const org = { id: ORG_ID };
+  const property = await api<{ id: string }>('POST', '/v1/properties', { name: 'Casa Teste' });
   const unit = await api<{ id: string }>('POST', `/v1/properties/${property.id}/units`, { name: 'Suíte', inventory: 1 });
   await api('POST', `/v1/units/${unit.id}/rate-plans`, {
     name: 'Flexível',
@@ -67,7 +80,6 @@ async function scenario() {
     minStay: 1,
   });
   const conn = await api<{ id: string }>('POST', '/v1/connections', {
-    orgId: org.id,
     channel: 'mock',
     label: `Mock ${Math.random()}`,
     status: 'active',
@@ -86,12 +98,13 @@ test('health não exige autenticação e lista os canais', async () => {
 test('requisição sem chave responde 401', async () => {
   const response = await app.inject({ method: 'GET', url: '/v1/channels' });
   assert.equal(response.statusCode, 401);
+  const invalid = await app.inject({ method: 'GET', url: '/v1/channels', headers: { authorization: 'Bearer hsk_invalido' } });
+  assert.equal(invalid.statusCode, 401);
 });
 
 test('publicação exige conexão ativa', async () => {
   const { org, unit } = await scenario();
   const pending = await api<{ id: string }>('POST', '/v1/connections', {
-    orgId: org.id,
     channel: 'mock',
     label: `Pendente ${Math.random()}`,
     status: 'pending',
@@ -273,6 +286,18 @@ test('cancelamento libera a disponibilidade de novo', async () => {
   assert.ok(availability.every((day) => day.available === 1));
 });
 
+test('ARI recusa disponibilidade acima do inventário', async () => {
+  const { unit } = await scenario();
+  const response = await app.inject({
+    method: 'PUT',
+    url: `/v1/units/${unit.id}/ari`,
+    headers: AUTH,
+    payload: { days: [{ date: addDays(start, 85), available: 3 }] },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.match(response.json().message, /excede o inventário/);
+});
+
 test('bloqueio manual fecha as datas e propaga ao canal', async () => {
   const { unit, listing } = await scenario();
   const published = await api<{ externalId: string }>('POST', `/v1/listings/${listing.id}/publish`);
@@ -304,11 +329,10 @@ test('cotação aplica mínimo de noites e devolve total com limpeza', async () 
 });
 
 test('canal não certificado responde 409 e não polui o outbox', async () => {
-  const org = await api<{ id: string }>('POST', '/v1/organizations', { name: `Org ${Math.random()}` });
-  const property = await api<{ id: string }>('POST', '/v1/properties', { orgId: org.id, name: 'Casa' });
+  const org = { id: ORG_ID };
+  const property = await api<{ id: string }>('POST', '/v1/properties', { name: 'Casa' });
   const unit = await api<{ id: string }>('POST', `/v1/properties/${property.id}/units`, { name: 'U' });
   const booking = await api<{ id: string }>('POST', '/v1/connections', {
-    orgId: org.id,
     channel: 'booking',
     label: 'Booking',
     status: 'active',

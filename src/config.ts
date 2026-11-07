@@ -23,15 +23,15 @@ const num = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-/** Nome montado em runtime: nenhuma credencial aparece como literal no código. */
-const AUTH_ENV = ['API', 'KEY'].join('_');
+/** Segredo de bootstrap: cria a primeira organização e o primeiro token. */
+const BOOTSTRAP_ENV = 'HOSFERA_BOOTSTRAP';
 
 export const config = {
   env: process.env.NODE_ENV ?? 'development',
   port: num(process.env.PORT, 3000),
   host: process.env.HOST ?? '127.0.0.1',
   databasePath: process.env.DATABASE_PATH ?? './data/hosfera.db',
-  authKey: process.env[AUTH_ENV] ?? 'dev-local-key',
+  bootstrapKey: process.env[BOOTSTRAP_ENV] ?? 'dev-bootstrap',
   dispatcher: {
     intervalMs: num(process.env.DISPATCH_INTERVAL_MS, 2000),
     batchSize: num(process.env.DISPATCH_BATCH, 25),

@@ -22,3 +22,19 @@ export class ValidationError extends Error {
     this.name = 'ValidationError';
   }
 }
+
+/** Autenticado, mas sem permissão para a ação. */
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
+/** Credencial ausente ou inválida. */
+export class UnauthorizedError extends Error {
+  constructor(message = 'credencial ausente ou inválida') {
+    super(message);
+    this.name = 'UnauthorizedError';
+  }
+}

@@ -13,7 +13,7 @@ import { AdapterRegistry } from '../connectivity/registry.ts';
 import type { MockChannelAdapter } from '../connectivity/adapters/mock.ts';
 import { addDays, todayUtc } from '../domain/dates.ts';
 
-const API = 'dev-smoke-key';
+const BOOTSTRAP = 'smoke-bootstrap';
 const db = openDatabase(':memory:');
 const registry = AdapterRegistry.withDefaults({ enableMock: true });
 const mock = registry.get('mock') as unknown as MockChannelAdapter;
@@ -27,7 +27,7 @@ const app = createApp({
     port: 0,
     host: '127.0.0.1',
     databasePath: ':memory:',
-    authKey: API,
+    bootstrapKey: BOOTSTRAP,
     dispatcher: { intervalMs: 60_000, batchSize: 50, maxAttempts: 6, baseBackoffMs: 1000, maxBackoffMs: 60_000 },
     enableMockChannel: true,
   },
@@ -41,10 +41,16 @@ const base = `http://127.0.0.1:${address.port}`;
 let checks = 0;
 const failures: string[] = [];
 
+let token = '';
+
 async function call<T>(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
   const response = await fetch(base + path, {
     method,
-    headers: { 'content-type': 'application/json', 'x-api-key': API, ...extraHeaders },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
@@ -73,8 +79,20 @@ try {
   check('serviço responde ok', health.status === 'ok');
   check('catálogo inclui os 6 canais + mock', health.channels.length === 7, health.channels);
 
+  console.log('\n▶ bootstrap e identidade');
+  const boot = await call<{ organization: { id: string }; token: string; user: { role: string } }>(
+    'POST',
+    '/v1/bootstrap',
+    { orgName: 'Org Smoke', userName: 'Operador Smoke' },
+    { 'x-bootstrap-key': BOOTSTRAP },
+  );
+  token = boot.token;
+  const org = boot.organization;
+  check('bootstrap devolve token de owner', boot.user.role === 'owner' && token.startsWith('hsk_'), boot.user);
+  const me = await call<{ organization: { id: string }; role: string; permissions: string[] }>('GET', '/v1/me');
+  check('token resolve a própria organização', me.organization.id === org.id && me.permissions.length > 0, me.role);
+
   console.log('\n▶ inventário');
-  const org = await call<{ id: string }>('POST', '/v1/organizations', { name: 'Org Smoke' });
   const property = await call<{ id: string }>('POST', '/v1/properties', { orgId: org.id, name: 'Casa Smoke', city: 'Porto Seguro' });
   const unit = await call<{ id: string }>('POST', `/v1/properties/${property.id}/units`, { name: 'Suíte', inventory: 1, minStay: 2 });
   await call('POST', `/v1/units/${unit.id}/rate-plans`, {
@@ -116,7 +134,7 @@ try {
 
   const bookingPublish = await fetch(`${base}/v1/listings/${bookingListing.id}/publish`, {
     method: 'POST',
-    headers: { 'x-api-key': API },
+    headers: { authorization: `Bearer ${token}` },
   });
   check('canal não certificado recusa publicação com 409', bookingPublish.status === 409, bookingPublish.status);
 
@@ -202,14 +220,44 @@ try {
 
   const invalid = await fetch(`${base}/v1/reservations/${reservation.reservationId}/status`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': API },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ status: 'pending' }),
   });
   check('transição inválida recusada', invalid.status === 400, invalid.status);
 
-  console.log('\n▶ autenticação');
-  const unauthorized = await fetch(`${base}/v1/summary?orgId=${org.id}`);
-  check('sem x-api-key responde 401', unauthorized.status === 401, unauthorized.status);
+  console.log('\n▶ autenticação e RBAC');
+  const unauthorized = await fetch(`${base}/v1/summary`);
+  check('sem token responde 401', unauthorized.status === 401, unauthorized.status);
+
+  const viewer = await call<{ token: string }>('POST', '/v1/tokens', { userName: 'Leitor', role: 'viewer' });
+  const viewerWrite = await fetch(`${base}/v1/units/${unit.id}/ari`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${viewer.token}` },
+    body: JSON.stringify({ days: [{ date: addDays(start, 90), rateCents: 1 }] }),
+  });
+  check('viewer não escreve ARI (403)', viewerWrite.status === 403, viewerWrite.status);
+
+  const viewerRead = await fetch(`${base}/v1/reservations`, { headers: { authorization: `Bearer ${viewer.token}` } });
+  check('viewer lê reservas (200)', viewerRead.status === 200, viewerRead.status);
+
+  const otherOrg = await call<{ organization: { id: string }; token: string }>(
+    'POST',
+    '/v1/bootstrap',
+    { orgName: 'Outra Org', userName: 'Outro' },
+    { 'x-bootstrap-key': BOOTSTRAP },
+  );
+  const crossTenant = await fetch(`${base}/v1/units/${unit.id}/availability?from=${addDays(start, 1)}&to=${addDays(start, 3)}`, {
+    headers: { authorization: `Bearer ${otherOrg.token}` },
+  });
+  check('token de outra organização não vê a unidade (404)', crossTenant.status === 404, crossTenant.status);
+
+  const tokens = await call<{ id: string; role: string }[]>('GET', '/v1/tokens');
+  const viewerToken = tokens.find((t) => t.role === 'viewer');
+  if (viewerToken) {
+    await call('DELETE', `/v1/tokens/${viewerToken.id}`);
+    const afterRevoke = await fetch(`${base}/v1/reservations`, { headers: { authorization: `Bearer ${viewer.token}` } });
+    check('token revogado deixa de autenticar (401)', afterRevoke.status === 401, afterRevoke.status);
+  }
 } catch (error) {
   failures.push(String(error));
   console.error('\nerro no smoke:', error);

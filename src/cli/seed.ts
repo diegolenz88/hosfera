@@ -5,6 +5,8 @@
  *
  * Idempotente por nome de organização: rodar duas vezes não duplica o cenário.
  */
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { openDatabase } from '../db/database.ts';
 import { config } from '../config.ts';
 import { AdapterRegistry } from '../connectivity/registry.ts';
@@ -21,6 +23,7 @@ import {
 import { publishListing } from '../services/publishing.service.ts';
 import { setAri } from '../services/ari.service.ts';
 import { Dispatcher } from '../services/dispatcher.service.ts';
+import { createToken, listTokens } from '../auth/tokens.ts';
 import { addDays, todayUtc } from '../domain/dates.ts';
 
 const ORG_NAME = 'Administradora Demo';
@@ -34,6 +37,10 @@ const orgRow = db.prepare('SELECT * FROM organizations WHERE name = ?').get(ORG_
   | undefined;
 
 const org = orgRow ? { id: String(orgRow.id), name: String(orgRow.name) } : createOrganization(db, ORG_NAME);
+// Token de `owner` para a operação local. Só é impresso na criação.
+const existingToken = listTokens(db, org.id).find((t) => t.label === 'seed' && !t.revokedAt);
+const issued = existingToken ? null : createToken(db, { orgId: org.id, userName: 'Operador Demo', role: 'owner', label: 'seed' });
+
 if (orgRow) {
   console.log('cenário já existente, reutilizando organização', org.id);
 } else {
@@ -140,5 +147,14 @@ console.log('unidades   ', Number(unitCount.total), '· anúncios', Number(listi
 console.log('conexões   ', connections.map((c) => `${c.channel}:${c.status}`).join(', '));
 console.log('unidade1   ', suite.id, '(Suíte Aurora)');
 console.log('unidade2   ', loft.id, '(Loft Maré)');
+if (issued) {
+  // Arquivo local para o smoke visual e para o navegador (nunca versionado).
+  writeFileSync(join(config.databasePath, '..', '.dev-token'), issued.token, { mode: 0o600 });
+  console.log('\n── token de acesso (aparece uma única vez) ──');
+  console.log(issued.token);
+  console.log('no navegador: abra http://127.0.0.1:' + config.port + ' e cole o token acima.');
+} else {
+  console.log('\ntoken já emitido anteriormente (label "seed"). Gere outro com POST /v1/tokens.');
+}
 console.log('\nuse `npm run smoke` para exercitar a API de ponta a ponta.');
 db.close();
