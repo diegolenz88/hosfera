@@ -231,6 +231,42 @@ try {
   });
   check('transição inválida recusada', invalid.status === 400, invalid.status);
 
+  console.log('\n▶ onboarding, fotos e financeiro');
+  const amenityCatalog = await call<{ code: string }[]>('GET', '/v1/amenities');
+  check('catálogo de comodidades disponível', amenityCatalog.length >= 10, amenityCatalog.length);
+
+  const onboard = await call<{ propertyId: string; units: { id: string }[] }>('POST', '/v1/onboarding', {
+    property: { name: 'Casa Smoke 2', ownerName: 'Proprietária Smoke', ownerSharePct: 60 },
+    units: [{ name: 'Studio', basePriceCents: 30_000, cleaningFeeCents: 8_000, minStay: 1, amenities: ['Wi-Fi', 'piscina'] }],
+  });
+  check('onboarding cria imóvel com unidade e tarifa', onboard.units.length === 1 && Boolean(onboard.propertyId));
+
+  const studioId = onboard.units[0]!.id;
+  const duplicated = await call<{ unitId: string; copiedRatePlans: number }>('POST', `/v1/units/${studioId}/duplicate`, {
+    name: 'Studio 2',
+  });
+  check('duplicar unidade copia a tarifa', duplicated.copiedRatePlans === 1, duplicated);
+
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+  const photo = await call<{ id: string; url: string }>('POST', `/v1/units/${studioId}/photos`, {
+    dataBase64: png,
+    contentType: 'image/png',
+  });
+  const imageResponse = await fetch(`${base}${photo.url}?t=${token}`, { headers: {} });
+  check('foto é servida com content-type de imagem', imageResponse.ok && imageResponse.headers.get('content-type') === 'image/png');
+
+  const payouts = await call<{ totals: { grossCents: number; ownerPayableCents: number }; properties: unknown[] }>(
+    'GET',
+    `/v1/finance/payouts?from=${addDays(start, 1)}&to=${addDays(start, 365)}`,
+  );
+  check('repasse calculado sobre o líquido', payouts.totals.grossCents > 0 && payouts.totals.ownerPayableCents < payouts.totals.grossCents, payouts.totals);
+
+  const reconciliation = await call<{ counts: { critical: number }; issues: unknown[] }>(
+    'GET',
+    `/v1/reconciliation?from=${addDays(start, 1)}&to=${addDays(start, 365)}`,
+  );
+  check('reconciliação roda e devolve contagens', typeof reconciliation.counts.critical === 'number', reconciliation.counts);
+
   console.log('\n▶ autenticação e RBAC');
   const unauthorized = await fetch(`${base}/v1/summary`);
   check('sem token responde 401', unauthorized.status === 401, unauthorized.status);
