@@ -30,6 +30,23 @@ const el = (html) => {
   return t.content.firstElementChild;
 };
 
+/** Rótulos em pt-BR para os status que vêm da API (que permanecem em inglês). */
+const PT = {
+  confirmed: 'confirmada',
+  pending: 'pendente',
+  checked_in: 'check-in feito',
+  checked_out: 'check-out feito',
+  cancelled: 'cancelada',
+  no_show: 'no-show',
+  published: 'publicado',
+  draft: 'rascunho',
+  paused: 'pausado',
+  active: 'ativo',
+  error: 'erro',
+  disabled: 'desativado',
+};
+const pt = (value) => PT[value] ?? String(value).replace(/_/g, ' ');
+
 const brl = (cents) =>
   (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
@@ -381,7 +398,7 @@ function renderReservations() {
         <td class="k">${r.guestName ?? '—'}</td>
         <td>${fmtDate(r.checkin)} → ${fmtDate(r.checkout)}</td>
         <td class="muted">${r.channel}</td>
-        <td><span class="badge ${r.status}">${r.status.replace('_', ' ')}</span></td>
+        <td><span class="badge ${r.status}">${pt(r.status)}</span></td>
         <td class="num">${brl(r.totalCents)}</td>
         <td class="num muted">${brl(r.commissionCents)}</td>
         <td style="text-align:right">${
@@ -464,14 +481,18 @@ function renderChannels() {
       return `<div class="channel">
         <h3>${channel.channel}</h3>
         <div class="status">${
-          channel.channel === 'mock' ? 'canal de desenvolvimento' : 'pendente de certificação'
+          channel.channel === 'mock'
+            ? 'canal de desenvolvimento'
+            : channel.implemented
+              ? 'protocolo implementado · homologação pendente'
+              : 'pendente de implementação e certificação'
         }</div>
         <div class="caps">${caps}</div>
         <div class="muted" style="font-size:11px;line-height:1.45">${channel.certification}</div>
         <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
           ${connections
             .map(
-              (conn) => `<span class="cap${conn.status === 'active' ? ' on' : ''}">${conn.label} · ${conn.status}</span>`,
+              (conn) => `<span class="cap${conn.status === 'active' ? ' on' : ''}">${conn.label} · ${pt(conn.status)}</span>`,
             )
             .join('')}
         </div>
@@ -485,7 +506,7 @@ function renderChannels() {
         <td class="k">${l.unitName ?? l.unitId.slice(0, 8)}</td>
         <td class="muted">${l.channel}</td>
         <td>${l.externalId ?? '—'}</td>
-        <td><span class="badge ${l.status}">${l.status}</span></td>
+        <td><span class="badge ${l.status}">${pt(l.status)}</span></td>
         <td style="text-align:right">${
           l.status !== 'published' && can('listing:publish')
             ? `<button class="btn btn-sm" data-publish="${l.id}">Publicar</button>`
