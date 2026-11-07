@@ -49,6 +49,10 @@ export interface Property {
   country: string;
   address: string | null;
   timezone: string;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  /** Percentual do líquido que cabe ao proprietário. */
+  ownerSharePct: number;
   createdAt: Timestamp;
 }
 
@@ -61,6 +65,21 @@ export interface Unit {
   currency: Currency;
   minStay: number;
   maxStay: number;
+  /** Capacidade máxima de hóspedes. */
+  capacity: number;
+  checkinFrom: string | null;
+  checkoutUntil: string | null;
+  houseRules: string | null;
+  createdAt: Timestamp;
+}
+
+export interface UnitPhoto {
+  id: Id;
+  unitId: Id;
+  position: number;
+  contentType: string;
+  bytes: number;
+  sha256: string;
   createdAt: Timestamp;
 }
 
