@@ -1,10 +1,12 @@
 {
   "name": "hosfera",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "hosfera — PMS + channel manager para aluguel por temporada",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "node --watch src/main.ts",
     "start": "node src/main.ts",

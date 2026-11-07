@@ -1,12 +1,49 @@
 # API — hosfera v0.1
 
-Base: `http://127.0.0.1:3000` · Autenticação: `x-api-key: <valor de API_KEY>`
-(`/health` e `/v1/webhooks/*` são públicos; webhook se autentica por assinatura).
+Base: `http://127.0.0.1:3000` · Autenticação: envie o token `hsk_...` no header
+`Authorization` (esquema Bearer) ou em `x-api-key` — o alias existe para CLIs
+simples. O token determina **organização e papel**; o cliente não informa de qual
+organização é. `/health`, `/v1/bootstrap` e `/v1/webhooks/*` (assinatura própria)
+são as únicas rotas sem token.
 
 ```bash
 export H=http://127.0.0.1:3000
-export K=$(grep '^API_KEY=' .env | cut -d= -f2)
+export K=$(cat data/.dev-token)     # emitido por `npm run seed`
 ```
+
+## Obter o primeiro token
+
+```bash
+curl -s -X POST $H/v1/bootstrap \
+  -H 'content-type: application/json' \
+  -H 'x-bootstrap-key: dev-bootstrap' \
+  -d '{"orgName":"Administradora Demo","userName":"Operador"}'
+# → {"organization":{...},"user":{"role":"owner"},"token":"hsk_..."}
+```
+
+O token aparece **uma única vez**. Em produção o endpoint fica desabilitado se
+`HOSFERA_BOOTSTRAP` não estiver definido.
+
+## Papéis
+
+| Papel | Pode |
+| --- | --- |
+| `owner` | tudo, incluindo emitir/revogar tokens |
+| `manager` | inventário, tarifas, canais, publicação, reservas, financeiro (leitura) |
+| `operations` | reservas, tarefas, calendário e bloqueios |
+| `finance` | leitura de reservas e financeiro |
+| `viewer` | leitura de reservas |
+
+```bash
+# emitir um token de operação
+curl -s -X POST $H/v1/tokens -H "x-api-key: $K" -H 'content-type: application/json' \
+  -d '{"userName":"Equipe limpeza","role":"operations","label":"operacao"}'
+
+curl -s $H/v1/me -H "x-api-key: $K"        # quem sou eu + permissões
+curl -s -X DELETE $H/v1/tokens/<id> -H "x-api-key: $K"
+```
+
+Ação fora do papel responde **403**; recurso de outra organização responde **404**.
 
 ## Sistema
 
@@ -21,8 +58,7 @@ fonte da verdade sobre o que está homologado.
 ## Inventário
 
 ```bash
-ORG=$(curl -s -X POST $H/v1/organizations -H "x-api-key: $K" -H 'content-type: application/json' \
-  -d '{"name":"Administradora Demo"}' | jq -r .id)
+ORG=$(curl -s $H/v1/me -H "x-api-key: $K" | jq -r .organization.id)
 
 PROP=$(curl -s -X POST $H/v1/properties -H "x-api-key: $K" -H 'content-type: application/json' \
   -d "{\"orgId\":\"$ORG\",\"name\":\"Casa Praia\",\"city\":\"Mata de São João\"}" | jq -r .id)

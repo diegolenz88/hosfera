@@ -31,8 +31,10 @@ sem depender de credencial de OTA.
 | Channel manager (outbox, retry, dead-letter, auditoria) | funcional |
 | Canal `mock` (desenvolvimento) | funcional, com webhook assinado |
 | Booking, Airbnb, Decolar, Expedia, Vrbo, Google | catálogo + capacidades; **pendentes de certificação** (ver ADR 0004) |
-| API HTTP | fastify, `x-api-key` provisório |
-| UI operacional | não iniciada |
+| Identidade | token opaco + RBAC por organização (5 papéis), 77 testes |
+| Persistência de esquema | migrations versionadas (`migrations/`) |
+| API HTTP | fastify, `Authorization: Bearer` |
+| UI operacional | calendário editável, reservas, tarefas e canais (sem build) |
 
 ## Requisitos
 
@@ -45,11 +47,13 @@ sem depender de credencial de OTA.
 npm install
 cp .env.example .env        # opcional: ajuste porta e caminho do banco
 npm run seed                # cria organização, casa, 2 unidades, conexões e calendário
-npm start                   # API em http://127.0.0.1:3000
+npm start                   # API + interface em http://127.0.0.1:3000
 ```
 
-O seed imprime os ids do cenário (`orgId`, `unidade1`, `unidade2`) e publica um
-anúncio no canal `mock`.
+O seed imprime o **token de acesso** (`hsk_...`) uma única vez e grava uma cópia em
+`data/.dev-token` (fora do versionamento). Abra `http://127.0.0.1:3000`, cole o
+token e a operação abre no calendário. Sem token, a tela oferece "criar organização
+demo" usando a chave de bootstrap do `.env`.
 
 ```bash
 npm test          # 65 testes (domínio, contrato dos adaptadores, fluxo HTTP)
@@ -77,11 +81,16 @@ financeiro → fan-out entre canais → autenticação.
 
 ## Endpoints
 
-Autenticação: header `x-api-key` (exceto `/health` e `/v1/webhooks/*`, que usam
-assinatura). Referência com exemplos: [`docs/api.md`](docs/api.md).
+Autenticação: `Authorization: Bearer <token>`. O token carrega organização e papel
+— **o cliente nunca informa de qual organização é**. `/health`, `/v1/bootstrap` e
+`/v1/webhooks/*` (assinatura) são as únicas rotas sem token. Referência com
+exemplos: [`docs/api.md`](docs/api.md).
 
 | Método | Rota | Função |
 | --- | --- | --- |
+| POST | `/v1/bootstrap` | cria organização + primeiro token (chave de ambiente) |
+| GET | `/v1/me` | usuário, papel, organização e permissões |
+| GET/POST/DELETE | `/v1/tokens` | emissão e revogação de tokens |
 | GET | `/health` | status, canais, contadores do outbox |
 | GET | `/v1/channels` | catálogo com capacidades e pendência de certificação |
 | POST | `/v1/organizations` | criar organização |
@@ -103,13 +112,16 @@ assinatura). Referência com exemplos: [`docs/api.md`](docs/api.md).
 ## Estrutura
 
 ```
+migrations/      001_init, 002_auth (versionadas, imutáveis)
 src/
   domain/        regras puras: datas, disponibilidade, preço, ciclo de reserva
-  db/            esquema + repositórios (SQL único, prepared statements)
+  auth/          tokens (hash SHA-256) e matriz de permissões
+  db/            migrations runner + repositórios (SQL único, prepared statements)
   connectivity/  contrato de adaptador, registry, adapters (mock + pendentes)
   services/      casos de uso: ARI, publicação, reserva, dispatcher
   http/          fastify: rotas, autenticação, tratamento de erro
   cli/           seed e smoke
+public/          interface operacional (HTML/CSS/JS, sem build)
 tests/
   domain/        regras de negócio
   connectivity/  contrato que todo adaptador precisa cumprir
@@ -126,12 +138,14 @@ docs/
 - [ADR 0002 — SQLite agora, Postgres na produção](docs/adr/0002-sqlite-agora-postgres-depois.md)
 - [ADR 0003 — disponibilidade derivada, não armazenada](docs/adr/0003-disponibilidade-derivada.md)
 - [ADR 0004 — canal não certificado falha explícito](docs/adr/0004-canais-nao-certificados.md)
+- [ADR 0005 — identidade por token e RBAC](docs/adr/0005-identidade-token-rbac.md)
+- [ADR 0006 — migrations versionadas](docs/adr/0006-migrations-versionadas.md)
 
 ## O que ainda não existe (honestamente)
 
-- Telas: onboarding, calendário, inbox, tarefas, financeiro — nada de UI ainda.
-- Multi-tenant por requisição: hoje a organização é escopada por parâmetro, não
-  derivada do token. RBAC e OIDC entram junto com a primeira tela.
+- Inbox de mensagens e financeiro na UI: existem na API, não na tela.
+- OIDC (login humano com e-mail/senha ou SSO): hoje é token por usuário.
+- Escopo por imóvel: um `manager` enxerga todo o portfólio da organização.
 - Pagamentos: `ledger_entries` registram valores, não processam cobrança.
 - Preço dinâmico (revenue management): só tarifa base + override por dia.
 - Os seis canais reais: contrato e matriz de capacidades prontos; implementação
