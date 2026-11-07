@@ -9,16 +9,7 @@ import type {
 } from '../adapter.ts';
 import { ChannelError } from '../adapter.ts';
 import type { Channel, Listing } from '../../domain/types.ts';
-
-export interface ChannelProfile {
-  channel: Channel;
-  capabilities: ChannelCapabilities;
-  /** Modelo de autenticação documentado pelo canal. */
-  auth: string;
-  /** Pré-requisito comercial/técnico para sair de `pending`. */
-  certification: string;
-  docs: string;
-}
+import type { ChannelProfile } from '../profiles.ts';
 
 /**
  * Adaptador de canal ainda não certificado.

@@ -79,6 +79,7 @@ try {
   check('serviço responde ok', health.status === 'ok');
   check('catálogo inclui os 6 canais + mock', health.channels.length === 7, health.channels);
 
+
   console.log('\n▶ bootstrap e identidade');
   const boot = await call<{ organization: { id: string }; token: string; user: { role: string } }>(
     'POST',
@@ -91,6 +92,11 @@ try {
   check('bootstrap devolve token de owner', boot.user.role === 'owner' && token.startsWith('hsk_'), boot.user);
   const me = await call<{ organization: { id: string }; role: string; permissions: string[] }>('GET', '/v1/me');
   check('token resolve a própria organização', me.organization.id === org.id && me.permissions.length > 0, me.role);
+
+  const catalog = await call<{ channel: string; implemented: boolean; certification: string }[]>('GET', '/v1/channels');
+  const booking = catalog.find((entry) => entry.channel === 'booking');
+  check('booking anuncia protocolo implementado', booking?.implemented === true, booking);
+  check('booking segue pendente de homologação', /Connectivity Partner/.test(booking?.certification ?? ''), booking);
 
   console.log('\n▶ inventário');
   const property = await call<{ id: string }>('POST', '/v1/properties', { orgId: org.id, name: 'Casa Smoke', city: 'Porto Seguro' });

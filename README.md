@@ -30,11 +30,13 @@ sem depender de credencial de OTA.
 | Persistência | SQLite via `node:sqlite`, esquema canônico |
 | Channel manager (outbox, retry, dead-letter, auditoria) | funcional |
 | Canal `mock` (desenvolvimento) | funcional, com webhook assinado |
-| Booking, Airbnb, Decolar, Expedia, Vrbo, Google | catálogo + capacidades; **pendentes de certificação** (ver ADR 0004) |
-| Identidade | token opaco + RBAC por organização (5 papéis), 77 testes |
+| Booking.com | **protocolo OTA 2003B implementado** (ARI, reserva, cancelamento, ping); homologação pendente (ADR 0007) |
+| Airbnb, Decolar, Expedia, Vrbo, Google | catálogo + capacidades; pendentes de implementação e certificação (ADR 0004) |
+| Identidade | token opaco + RBAC por organização (5 papéis) |
 | Persistência de esquema | migrations versionadas (`migrations/`) |
 | API HTTP | fastify, `Authorization: Bearer` |
 | UI operacional | calendário editável, reservas, tarefas e canais (sem build) |
+| Testes | 103 (domínio, contrato de adaptadores, OTA, fluxo HTTP, RBAC) |
 
 ## Requisitos
 
@@ -63,7 +65,12 @@ npm run smoke     # sobe a API em porta efêmera e percorre o fluxo completo
 
 O `smoke` é o teste que importa antes de qualquer commit: ele exercita
 publicação → ARI → dispatch → reserva de canal → disponibilidade → tarefas →
-financeiro → fan-out entre canais → autenticação.
+financeiro → fan-out entre canais → autenticação e RBAC.
+
+Para o Booking há teste de contrato próprio: `tests/connectivity/booking/`
+(XML gerado, reserva parseada, classificação de erro) e
+`tests/api/booking-webhook.test.ts` (webhook XML ponta a ponta, ack OTA,
+cancelamento liberando inventário).
 
 ## Fluxo principal
 
@@ -140,6 +147,8 @@ docs/
 - [ADR 0004 — canal não certificado falha explícito](docs/adr/0004-canais-nao-certificados.md)
 - [ADR 0005 — identidade por token e RBAC](docs/adr/0005-identidade-token-rbac.md)
 - [ADR 0006 — migrations versionadas](docs/adr/0006-migrations-versionadas.md)
+- [ADR 0007 — Booking: protocolo implementado, homologação como gate](docs/adr/0007-booking-protocolo-homologacao.md)
+- [Checklist de ativação do Booking](docs/booking-activation.md)
 
 ## O que ainda não existe (honestamente)
 
@@ -148,5 +157,7 @@ docs/
 - Escopo por imóvel: um `manager` enxerga todo o portfólio da organização.
 - Pagamentos: `ledger_entries` registram valores, não processam cobrança.
 - Preço dinâmico (revenue management): só tarifa base + override por dia.
-- Os seis canais reais: contrato e matriz de capacidades prontos; implementação
-  depende de homologação (ADR 0004).
+- Booking: falta credencial e homologação — o checklist está em
+  `docs/booking-activation.md`.
+- Airbnb, Decolar, Expedia, Vrbo e Google: apenas contrato e matriz de
+  capacidades; nenhum protocolo implementado ainda.

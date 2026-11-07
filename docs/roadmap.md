@@ -32,7 +32,10 @@ Próximo:
 
 - [ ] **Onboarding**: fotos, comodidades, políticas, duplicar unidade
 - [ ] **OIDC**: login humano (e-mail/senha ou SSO) substituindo o token colado
-- [ ] **Adaptador Booking** (OTA 2003B + B.XML) com sandbox
+- [x] **Adaptador Booking — protocolo** OTA 2003B (disponibilidade, tarifa,
+      reserva, cancelamento, ping) com transporte plugável e classificação de erro
+- [ ] **Booking em sandbox**: credencial de máquina, mapeamento RoomCode/RatePlan
+      e homologação ponta a ponta (`docs/booking-activation.md`)
 - [ ] **Observabilidade**: logs com `correlation_id`, métricas de sincronização
       (sucesso, p95, dead-letter) e alerta
 - [ ] **Rate limit por canal** no dispatcher (token bucket por conexão)

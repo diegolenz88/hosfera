@@ -76,6 +76,17 @@ export interface ChannelAdapter {
   normalizeReservation(ctx: ChannelContext, raw: unknown): NormalizedReservation;
   verifyWebhook(headers: Record<string, string | undefined>, rawBody: string): boolean;
   healthCheck(ctx?: ChannelContext): Promise<{ ok: boolean; detail: string }>;
+  /**
+   * Resposta que o canal espera receber no webhook. Quando ausente, a API
+   * responde JSON. Booking exige OTA_HotelResNotifRS — devolver JSON faria o
+   * canal reenviar a reserva indefinidamente.
+   */
+  confirmWebhook?(input: {
+    reservationId: string;
+    externalListingId: string;
+    echoToken?: string;
+    error?: string;
+  }): { status: number; contentType: string; body: string } | undefined;
 }
 
 /** Erro de integração com informação suficiente para o operador agir. */

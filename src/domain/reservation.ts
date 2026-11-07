@@ -94,10 +94,14 @@ export function normalizeStatus(channel: string, raw: string): ReservationStatus
     in_house: 'checked_in',
     checked_out: 'checked_out',
     completed: 'checked_out',
-    // Booking.com
+    // Booking.com (ResStatus das notificações OTA)
     ok: 'confirmed',
+    commit: 'confirmed',
     modify: 'confirmed',
+    modify_by_guest: 'confirmed',
     cancel: 'cancelled',
+    cancelled_by_property: 'cancelled',
+    no_show_at_property: 'no_show',
     // Airbnb (reservation status)
     inquiry: 'pending',
     accepted: 'confirmed',

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Db } from '../db/database.ts';
 import { config as defaultConfig, type Config } from '../config.ts';
 import { AdapterRegistry } from '../connectivity/registry.ts';
+import { bookingOptionsFromConfig } from '../connectivity/booking-config.ts';
 import { Dispatcher } from '../services/dispatcher.service.ts';
 import { ChannelError } from '../connectivity/adapter.ts';
 import { PricingError } from '../domain/pricing.ts';
@@ -88,7 +89,12 @@ const PUBLIC_PATHS = ['/health', '/v1/bootstrap', '/v1/webhooks/', '/', '/index.
 
 export function createApp(options: AppOptions): FastifyInstance {
   const cfg = options.config ?? defaultConfig;
-  const registry = options.registry ?? AdapterRegistry.withDefaults({ enableMock: cfg.enableMockChannel });
+  const registry =
+    options.registry ??
+    AdapterRegistry.withDefaults({
+      enableMock: cfg.enableMockChannel,
+      ...(cfg.booking ? { booking: bookingOptionsFromConfig(cfg) } : {}),
+    });
   const dispatcher =
     options.dispatcher ??
     new Dispatcher(options.db, registry, {
@@ -114,6 +120,16 @@ export function createApp(options: AppOptions): FastifyInstance {
       done(new Error('JSON inválido'), undefined);
     }
   });
+
+  // Canais OTA entregam reserva em XML: precisamos do corpo cru (assinatura) e
+  // sem parse — o adaptador do canal interpreta o documento.
+  for (const mediaType of ['application/xml', 'text/xml']) {
+    app.addContentTypeParser(mediaType, { parseAs: 'string' }, (request, body, done) => {
+      const raw = body as string;
+      (request as FastifyRequest & { rawBody?: string }).rawBody = raw;
+      done(null, raw);
+    });
+  }
 
   const tokenFrom = (request: FastifyRequest): string | null => {
     const header = request.headers.authorization;
@@ -457,20 +473,38 @@ export function createApp(options: AppOptions): FastifyInstance {
     const { channel, connectionId } = request.params as { channel: string; connectionId: string };
     const rawBody = (request as FastifyRequest & { rawBody?: string }).rawBody ?? '';
     const headers = request.headers as Record<string, string | undefined>;
-    const result = ingestReservation(options.db, registry, {
-      channel: channel as Channel,
-      connectionId,
-      headers,
-      rawBody,
-      raw: request.body,
-    });
-    return reply.code(result.created ? 201 : 200).send({
-      reservationId: result.reservation.id,
-      status: result.reservation.status,
-      created: result.created,
-      tasksCreated: result.tasksCreated,
-      republished: result.republished,
-    });
+    const adapter = registry.get(channel);
+    const echoToken = typeof headers['echo-token'] === 'string' ? headers['echo-token'] : undefined;
+
+    try {
+      const result = ingestReservation(options.db, registry, {
+        channel: channel as Channel,
+        connectionId,
+        headers,
+        rawBody,
+        raw: request.body,
+      });
+      // Canais OTA esperam a confirmação no próprio formato; devolver JSON faz
+      // o canal reenviar a reserva em loop.
+      const ack = adapter.confirmWebhook?.({
+        reservationId: result.reservation.externalId,
+        externalListingId: result.reservation.unitId,
+        echoToken,
+      });
+      if (ack) return reply.code(ack.status).header('content-type', ack.contentType).send(ack.body);
+      return reply.code(result.created ? 201 : 200).send({
+        reservationId: result.reservation.id,
+        status: result.reservation.status,
+        created: result.created,
+        tasksCreated: result.tasksCreated,
+        republished: result.republished,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const ack = adapter.confirmWebhook?.({ reservationId: '', externalListingId: '', echoToken, error: message });
+      if (ack) return reply.code(ack.status).header('content-type', ack.contentType).send(ack.body);
+      throw error;
+    }
   });
 
   app.get('/v1/reservations', async (request) => {
