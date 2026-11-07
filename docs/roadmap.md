@@ -30,7 +30,10 @@ Concluído nesta rodada (v0.2.0):
 
 Próximo:
 
-- [ ] **Onboarding**: fotos, comodidades, políticas, duplicar unidade
+- [x] **Onboarding**: imóvel + unidades + tarifa + comodidades em transação,
+      duplicar unidade, foto com validação por conteúdo e dedupe por hash
+- [x] **Financeiro**: repasse sobre o líquido, margem por canal, reconciliação
+      (overbooking, reserva sem lançamento, anúncio sem id externo)
 - [ ] **OIDC**: login humano (e-mail/senha ou SSO) substituindo o token colado
 - [x] **Adaptador Booking — protocolo** OTA 2003B (disponibilidade, tarifa,
       reserva, cancelamento, ping) com transporte plugável e classificação de erro

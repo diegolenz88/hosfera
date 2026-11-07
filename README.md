@@ -35,8 +35,11 @@ sem depender de credencial de OTA.
 | Identidade | token opaco + RBAC por organização (5 papéis) |
 | Persistência de esquema | migrations versionadas (`migrations/`) |
 | API HTTP | fastify, `Authorization: Bearer` |
-| UI operacional | calendário editável, reservas, tarefas e canais (sem build) |
-| Testes | 103 (domínio, contrato de adaptadores, OTA, fluxo HTTP, RBAC) |
+| UI operacional | calendário, reservas, tarefas, canais, onboarding e financeiro (sem build) |
+| Onboarding | imóvel + unidades + tarifa + comodidades em transação, duplicar unidade |
+| Fotos | upload validado por magic bytes, dedupe por hash, servidas com token |
+| Financeiro | repasse sobre o líquido, margem por canal, reconciliação de inconsistências |
+| Testes | 140 (domínio, contrato de adaptadores, OTA, fluxo HTTP, RBAC, onboarding, financeiro) |
 
 ## Requisitos
 
@@ -115,6 +118,12 @@ exemplos: [`docs/api.md`](docs/api.md).
 | GET/POST | `/v1/outbox`, `/v1/outbox/dispatch` | fila de saída |
 | GET | `/v1/audit` | trilha de eventos |
 | GET | `/v1/summary` | KPIs consolidados |
+| POST | `/v1/onboarding` | imóvel + unidades + tarifa + comodidades |
+| POST | `/v1/units/:id/duplicate` | duplicar unidade com tarifas e comodidades |
+| PUT | `/v1/units/:id/amenities` | comodidades da unidade |
+| POST/GET/DELETE | `/v1/units/:id/photos`, `/v1/photos/:id` | fotos do imóvel |
+| GET | `/v1/finance/payouts` | repasse por proprietário e margem por canal |
+| GET | `/v1/reconciliation` | inconsistências do período |
 
 ## Estrutura
 
@@ -148,11 +157,13 @@ docs/
 - [ADR 0005 — identidade por token e RBAC](docs/adr/0005-identidade-token-rbac.md)
 - [ADR 0006 — migrations versionadas](docs/adr/0006-migrations-versionadas.md)
 - [ADR 0007 — Booking: protocolo implementado, homologação como gate](docs/adr/0007-booking-protocolo-homologacao.md)
+- [ADR 0008 — onboarding, fotos e repasse](docs/adr/0008-onboarding-fotos-repasse.md)
 - [Checklist de ativação do Booking](docs/booking-activation.md)
 
 ## O que ainda não existe (honestamente)
 
-- Inbox de mensagens e financeiro na UI: existem na API, não na tela.
+- Inbox de mensagens na UI: existe na API, não na tela.
+- Envio de fotos para os canais (Content API): as fotos ficam na hosfera.
 - OIDC (login humano com e-mail/senha ou SSO): hoje é token por usuário.
 - Escopo por imóvel: um `manager` enxerga todo o portfólio da organização.
 - Pagamentos: `ledger_entries` registram valores, não processam cobrança.

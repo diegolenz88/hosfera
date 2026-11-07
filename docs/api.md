@@ -175,3 +175,43 @@ curl -s -H "x-api-key: $K" "$H/v1/audit?scope=reservation&refId=<id>"
 | 409 | `channel_not_certified` | canal sem homologação |
 | 422 | `pricing_error` | estadia abaixo do mínimo |
 | 502 | `channel_error` | falha retentável do canal |
+
+
+## Onboarding
+
+```bash
+# imóvel + unidades + tarifa + comodidades em uma transação
+curl -s -X POST $H/v1/onboarding -H "x-api-key: $K" -H 'content-type: application/json' -d '{
+  "property": { "name": "Casa Nova", "city": "Porto Seguro", "ownerName": "Ana", "ownerSharePct": 70 },
+  "units": [
+    { "name": "Suíte", "capacity": 4, "basePriceCents": 45000, "cleaningFeeCents": 15000,
+      "minStay": 2, "amenities": ["Wi-Fi", "piscina"] }
+  ]}'
+
+curl -s -X POST $H/v1/units/<id>/duplicate -H "x-api-key: $K" -H 'content-type: application/json' \
+  -d '{"name":"Suíte 2"}'
+```
+
+## Fotos
+
+```bash
+# conteúdo em base64; o tipo é decidido pelos magic bytes
+curl -s -X POST $H/v1/units/<id>/photos -H "x-api-key: $K" -H 'content-type: application/json' \
+  -d "{\"dataBase64\":\"$(base64 -w0 foto.jpg)\",\"contentType\":\"image/jpeg\"}"
+
+curl -s $H/v1/units/<id>/photos -H "x-api-key: $K"
+curl -s "$H/v1/photos/<photoId>?t=$K" -o foto.jpg    # <img> não envia header
+```
+
+Limite de 8 MB, JPEG/PNG/WebP. Conteúdo idêntico não duplica registro nem arquivo.
+
+## Financeiro e reconciliação
+
+```bash
+curl -s "$H/v1/finance/payouts?from=2026-12-01&to=2026-12-31" -H "x-api-key: $K"
+curl -s "$H/v1/reconciliation?from=2026-12-01&to=2026-12-31" -H "x-api-key: $K"
+```
+
+`payouts` devolve `totals`, uma linha por imóvel (bruto, comissão, líquido,
+percentual, repasse) e `channels` com margem líquida por canal.
+`reconciliation` devolve `{ counts, issues }`, com `severity` `critical` ou `warning`.
