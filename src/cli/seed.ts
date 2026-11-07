@@ -21,6 +21,7 @@ import {
   listProperties,
 } from '../db/repositories.ts';
 import { publishListing } from '../services/publishing.service.ts';
+import { setAmenities } from '../db/repositories.ts';
 import { setAri } from '../services/ari.service.ts';
 import { Dispatcher } from '../services/dispatcher.service.ts';
 import { createToken, listTokens } from '../auth/tokens.ts';
@@ -55,7 +56,16 @@ const property =
     city: 'Mata de São João',
     state: 'BA',
     address: 'Rua das Palmeiras, 120',
+    ownerName: 'Proprietária Ana',
+    ownerEmail: 'ana@example.com',
+    ownerSharePct: 70,
   });
+
+// Backfill idempotente: bancos criados antes do onboarding não têm proprietário.
+if (!property.ownerName) {
+  db.prepare('UPDATE properties SET owner_name = ?, owner_email = ?, owner_share_pct = 70 WHERE id = ?')
+    .run('Proprietária Ana', 'ana@example.com', property.id);
+}
 
 const units = db.prepare('SELECT * FROM units WHERE property_id = ?').all(property.id) as Record<string, unknown>[];
 const ensureUnit = (name: string, inventory: number) => {
@@ -68,6 +78,8 @@ const ensureUnit = (name: string, inventory: number) => {
 
 const suite = ensureUnit('Suíte Aurora', 1);
 const loft = ensureUnit('Loft Maré', 2);
+setAmenities(db, suite.id, ['wifi', 'ar_condicionado', 'piscina', 'churrasqueira', 'pet_friendly']);
+setAmenities(db, loft.id, ['wifi', 'cozinha', 'estacionamento', 'vista_mar']);
 
 for (const unit of [suite, loft]) {
   const plans = db.prepare('SELECT COUNT(*) AS total FROM rate_plans WHERE unit_id = ?').get(unit.id) as { total: number };

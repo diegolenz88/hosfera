@@ -18,6 +18,7 @@ import type {
   ReservationStatus,
   Task,
   TaskType,
+  UnitPhoto,
 } from '../domain/types.ts';
 
 export const nowIso = (): string => new Date().toISOString();
@@ -51,6 +52,27 @@ export interface PropertyInput {
   country?: string;
   address?: string | null;
   timezone?: string;
+  ownerName?: string | null;
+  ownerEmail?: string | null;
+  /** Percentual do líquido que cabe ao proprietário (0–100). */
+  ownerSharePct?: number;
+}
+
+export function mapProperty(row: Row): Property {
+  return {
+    id: str(row.id),
+    orgId: str(row.org_id),
+    name: str(row.name),
+    city: strOrNull(row.city),
+    state: strOrNull(row.state),
+    country: str(row.country),
+    address: strOrNull(row.address),
+    timezone: str(row.timezone),
+    ownerName: strOrNull(row.owner_name),
+    ownerEmail: strOrNull(row.owner_email),
+    ownerSharePct: num(row.owner_share_pct ?? 70),
+    createdAt: str(row.created_at),
+  };
 }
 
 export function createProperty(db: Db, input: PropertyInput): Property {
@@ -63,43 +85,29 @@ export function createProperty(db: Db, input: PropertyInput): Property {
     country: input.country ?? 'BR',
     address: input.address ?? null,
     timezone: input.timezone ?? 'America/Sao_Paulo',
+    ownerName: input.ownerName ?? null,
+    ownerEmail: input.ownerEmail ?? null,
+    ownerSharePct: input.ownerSharePct ?? 70,
     createdAt: nowIso(),
   };
+  if (p.ownerSharePct < 0 || p.ownerSharePct > 100) throw new Error('ownerSharePct deve estar entre 0 e 100');
   db.prepare(
-    `INSERT INTO properties (id, org_id, name, city, state, country, address, timezone, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(p.id, p.orgId, p.name, p.city, p.state, p.country, p.address, p.timezone, p.createdAt);
+    `INSERT INTO properties (id, org_id, name, city, state, country, address, timezone, owner_name, owner_email, owner_share_pct, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    p.id, p.orgId, p.name, p.city, p.state, p.country, p.address, p.timezone,
+    p.ownerName, p.ownerEmail, p.ownerSharePct, p.createdAt,
+  );
   return p;
 }
 
 export function listProperties(db: Db, orgId: string): Property[] {
-  return (db.prepare('SELECT * FROM properties WHERE org_id = ? ORDER BY name').all(orgId) as Row[]).map((row) => ({
-    id: str(row.id),
-    orgId: str(row.org_id),
-    name: str(row.name),
-    city: strOrNull(row.city),
-    state: strOrNull(row.state),
-    country: str(row.country),
-    address: strOrNull(row.address),
-    timezone: str(row.timezone),
-    createdAt: str(row.created_at),
-  }));
+  return (db.prepare('SELECT * FROM properties WHERE org_id = ? ORDER BY name').all(orgId) as Row[]).map(mapProperty);
 }
 
 export function getProperty(db: Db, propertyId: string): Property | null {
   const row = db.prepare('SELECT * FROM properties WHERE id = ?').get(propertyId) as Row | undefined;
-  if (!row) return null;
-  return {
-    id: str(row.id),
-    orgId: str(row.org_id),
-    name: str(row.name),
-    city: strOrNull(row.city),
-    state: strOrNull(row.state),
-    country: str(row.country),
-    address: strOrNull(row.address),
-    timezone: str(row.timezone),
-    createdAt: str(row.created_at),
-  };
+  return row ? mapProperty(row) : null;
 }
 
 export interface UnitInput {
@@ -109,6 +117,10 @@ export interface UnitInput {
   currency?: Currency;
   minStay?: number;
   maxStay?: number;
+  capacity?: number;
+  checkinFrom?: string | null;
+  checkoutUntil?: string | null;
+  houseRules?: string | null;
 }
 
 export function createUnit(db: Db, input: UnitInput): UnitRow {
@@ -120,12 +132,19 @@ export function createUnit(db: Db, input: UnitInput): UnitRow {
     currency: input.currency ?? 'BRL',
     minStay: input.minStay ?? 1,
     maxStay: input.maxStay ?? 365,
+    capacity: input.capacity ?? 2,
+    checkinFrom: input.checkinFrom ?? null,
+    checkoutUntil: input.checkoutUntil ?? null,
+    houseRules: input.houseRules ?? null,
     createdAt: nowIso(),
   };
   db.prepare(
-    `INSERT INTO units (id, property_id, name, inventory, currency, min_stay, max_stay, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(unit.id, unit.propertyId, unit.name, unit.inventory, unit.currency, unit.minStay, unit.maxStay, unit.createdAt);
+    `INSERT INTO units (id, property_id, name, inventory, currency, min_stay, max_stay, capacity, checkin_from, checkout_until, house_rules, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    unit.id, unit.propertyId, unit.name, unit.inventory, unit.currency, unit.minStay, unit.maxStay,
+    unit.capacity, unit.checkinFrom, unit.checkoutUntil, unit.houseRules, unit.createdAt,
+  );
   return unit;
 }
 
@@ -137,12 +156,14 @@ export type UnitRow = {
   currency: Currency;
   minStay: number;
   maxStay: number;
+  capacity: number;
+  checkinFrom: string | null;
+  checkoutUntil: string | null;
+  houseRules: string | null;
   createdAt: string;
 };
 
-export function getUnit(db: Db, unitId: string): UnitRow | null {
-  const row = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as Row | undefined;
-  if (!row) return null;
+export function mapUnit(row: Row): UnitRow {
   return {
     id: str(row.id),
     propertyId: str(row.property_id),
@@ -151,21 +172,21 @@ export function getUnit(db: Db, unitId: string): UnitRow | null {
     currency: str(row.currency) as Currency,
     minStay: num(row.min_stay),
     maxStay: num(row.max_stay),
+    capacity: num(row.capacity ?? 2),
+    checkinFrom: strOrNull(row.checkin_from),
+    checkoutUntil: strOrNull(row.checkout_until),
+    houseRules: strOrNull(row.house_rules),
     createdAt: str(row.created_at),
   };
 }
 
+export function getUnit(db: Db, unitId: string): UnitRow | null {
+  const row = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as Row | undefined;
+  return row ? mapUnit(row) : null;
+}
+
 export function listUnits(db: Db, propertyId: string): UnitRow[] {
-  return (db.prepare('SELECT * FROM units WHERE property_id = ? ORDER BY name').all(propertyId) as Row[]).map((row) => ({
-    id: str(row.id),
-    propertyId: str(row.property_id),
-    name: str(row.name),
-    inventory: num(row.inventory),
-    currency: str(row.currency) as Currency,
-    minStay: num(row.min_stay),
-    maxStay: num(row.max_stay),
-    createdAt: str(row.created_at),
-  }));
+  return (db.prepare('SELECT * FROM units WHERE property_id = ? ORDER BY name').all(propertyId) as Row[]).map(mapUnit);
 }
 
 export interface RatePlanInput {
@@ -727,4 +748,109 @@ export function listEventLog(db: Db, scope: string, refId: string | null, limit 
     payload: JSON.parse(str(row.payload_json || 'null')),
     createdAt: str(row.created_at),
   }));
+}
+
+// ───────────────────────────── comodidades e fotos ─────────────────────────────
+
+export function setAmenities(db: Db, unitId: string, codes: string[]): string[] {
+  const insert = db.prepare('INSERT OR IGNORE INTO unit_amenities (unit_id, code) VALUES (?, ?)');
+  const remove = db.prepare('DELETE FROM unit_amenities WHERE unit_id = ? AND code = ?');
+  const current = new Set(listAmenities(db, unitId));
+  const next = new Set(codes);
+  for (const code of next) if (!current.has(code)) insert.run(unitId, code);
+  for (const code of current) if (!next.has(code)) remove.run(unitId, code);
+  return [...next].sort();
+}
+
+export function listAmenities(db: Db, unitId: string): string[] {
+  return (db.prepare('SELECT code FROM unit_amenities WHERE unit_id = ? ORDER BY code').all(unitId) as Row[]).map((row) =>
+    str(row.code),
+  );
+}
+
+export function copyAmenities(db: Db, fromUnitId: string, toUnitId: string): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO unit_amenities (unit_id, code) SELECT ?, code FROM unit_amenities WHERE unit_id = ?',
+  ).run(toUnitId, fromUnitId);
+}
+
+const mapPhoto = (row: Row): UnitPhoto => ({
+  id: str(row.id),
+  unitId: str(row.unit_id),
+  position: num(row.position),
+  contentType: str(row.content_type),
+  bytes: num(row.bytes),
+  sha256: str(row.sha256),
+  createdAt: str(row.created_at),
+});
+
+export function insertPhoto(db: Db, input: Omit<UnitPhoto, 'id' | 'createdAt'>): { photo: UnitPhoto; created: boolean } {
+  const existing = db
+    .prepare('SELECT * FROM unit_photos WHERE unit_id = ? AND sha256 = ?')
+    .get(input.unitId, input.sha256) as Row | undefined;
+  if (existing) return { photo: mapPhoto(existing), created: false };
+
+  const photo: UnitPhoto = { ...input, id: id(), createdAt: nowIso() };
+  db.prepare(
+    'INSERT INTO unit_photos (id, unit_id, position, content_type, bytes, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(photo.id, photo.unitId, photo.position, photo.contentType, photo.bytes, photo.sha256, photo.createdAt);
+  return { photo, created: true };
+}
+
+export function nextPhotoPosition(db: Db, unitId: string): number {
+  const row = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS next FROM unit_photos WHERE unit_id = ?').get(unitId) as Row;
+  return num(row.next);
+}
+
+export function listPhotos(db: Db, unitId: string): UnitPhoto[] {
+  return (db.prepare('SELECT * FROM unit_photos WHERE unit_id = ? ORDER BY position, created_at').all(unitId) as Row[]).map(
+    mapPhoto,
+  );
+}
+
+export function getPhoto(db: Db, photoId: string): UnitPhoto | null {
+  const row = db.prepare('SELECT * FROM unit_photos WHERE id = ?').get(photoId) as Row | undefined;
+  return row ? mapPhoto(row) : null;
+}
+
+export function deletePhoto(db: Db, photoId: string): boolean {
+  const result = db.prepare('DELETE FROM unit_photos WHERE id = ?').run(photoId);
+  return Number(result.changes ?? 0) > 0;
+}
+
+// ───────────────────────────── consultas financeiras ─────────────────────────────
+
+export function listReservationsByRange(db: Db, orgId: string, from: DateString, to: DateString): Reservation[] {
+  return (
+    db
+      .prepare(
+        `SELECT * FROM reservations
+         WHERE org_id = ? AND status != 'cancelled' AND checkin < ? AND checkout > ?
+         ORDER BY checkin`,
+      )
+      .all(orgId, to, from) as Row[]
+  ).map(mapReservation);
+}
+
+export function listUnitsByOrg(db: Db, orgId: string): (UnitRow & { propertyName: string })[] {
+  return (
+    db
+      .prepare(
+        `SELECT u.*, p.name AS property_name FROM units u
+         JOIN properties p ON p.id = u.property_id
+         WHERE p.org_id = ? ORDER BY p.name, u.name`,
+      )
+      .all(orgId) as Row[]
+  ).map((row) => ({ ...mapUnit(row), propertyName: str(row.property_name) }));
+}
+
+export function reservationsWithLedger(db: Db, orgId: string): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT l.reservation_id FROM ledger_entries l
+       JOIN reservations r ON r.id = l.reservation_id
+       WHERE r.org_id = ?`,
+    )
+    .all(orgId) as Row[];
+  return new Set(rows.map((row) => str(row.reservation_id)));
 }

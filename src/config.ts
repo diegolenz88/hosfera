@@ -51,6 +51,8 @@ export interface AppConfig {
     maxBackoffMs: number;
   };
   enableMockChannel: boolean;
+  /** Diretório das fotos de imóvel (fora do banco, conteúdo endereçável por hash). */
+  uploadDir?: string;
   /** Opcional: testes e execuções sem Booking não precisam informar. */
   booking?: BookingConfig;
 }
@@ -83,6 +85,7 @@ export const config: AppConfig = {
     maxBackoffMs: 60_000,
   },
   enableMockChannel: (process.env.ENABLE_MOCK_CHANNEL ?? 'true') !== 'false',
+  uploadDir: process.env.UPLOAD_DIR ?? './data/uploads',
   booking,
 };
 

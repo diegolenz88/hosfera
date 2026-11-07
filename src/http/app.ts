@@ -32,10 +32,18 @@ import {
   listRatePlans,
   listReservations,
   listTasks,
+  listAmenities,
   listUnits,
   outboxStats,
+  setAmenities,
 } from '../db/repositories.ts';
+import { normalizeAmenities } from '../domain/amenities.ts';
 import { createToken, listTokens, resolveToken, revokeToken, ROLES, type AuthContext, type Role } from '../auth/tokens.ts';
+import { AMENITIES } from '../domain/amenities.ts';
+import { onboardProperty, duplicateUnit, updateUnitDetails } from '../services/onboarding.service.ts';
+import { listUnitPhotos, readPhoto, removePhoto, storePhoto, requireUnitInOrg } from '../services/photo.service.ts';
+import { payoutReport } from '../services/finance.service.ts';
+import { reconcileOrg } from '../services/reconciliation.service.ts';
 import { can, permissionsFor, type Action } from '../auth/permissions.ts';
 import {
   assertConnectionAccess,
@@ -85,7 +93,7 @@ const optionalNumber = (value: unknown): number | undefined =>
   value === undefined || value === null || value === '' ? undefined : Number(value);
 
 /** Rotas que não exigem token (webhook se autentica por assinatura; UI é pública). */
-const PUBLIC_PATHS = ['/health', '/v1/bootstrap', '/v1/webhooks/', '/', '/index.html', '/app.js', '/styles.css'];
+const PUBLIC_PATHS = ['/health', '/v1/bootstrap', '/v1/webhooks/', '/v1/photos/', '/', '/index.html', '/app.js', '/styles.css'];
 
 export function createApp(options: AppOptions): FastifyInstance {
   const cfg = options.config ?? defaultConfig;
@@ -104,6 +112,7 @@ export function createApp(options: AppOptions): FastifyInstance {
       maxBackoffMs: cfg.dispatcher.maxBackoffMs,
     });
 
+  const storageDir = cfg.uploadDir ?? './data/uploads';
   const app = Fastify({ logger: cfg.env === 'test' ? false : { level: 'warn' }, trustProxy: true });
 
   // Guarda o corpo cru: assinatura de webhook é sobre os bytes, não sobre o JSON reserializado.
@@ -309,7 +318,7 @@ export function createApp(options: AppOptions): FastifyInstance {
     const auth = guard(request, 'org:read');
     const { id } = request.params as { id: string };
     assertPropertyAccess(options.db, auth.orgId, id);
-    return listUnits(options.db, id);
+    return listUnits(options.db, id).map((unit) => ({ ...unit, amenities: listAmenities(options.db, unit.id) }));
   });
 
   app.post('/v1/properties/:id/units', async (request, reply) => {
@@ -465,6 +474,145 @@ export function createApp(options: AppOptions): FastifyInstance {
     const { id } = request.params as { id: string };
     assertListingAccess(options.db, auth.orgId, id);
     return publishListing(options.db, registry, id);
+  });
+
+  // ───────────────────────────── onboarding ─────────────────────────────
+
+  app.get('/v1/amenities', async (request) => {
+    guard(request, 'org:read');
+    return AMENITIES;
+  });
+
+  app.post('/v1/onboarding', async (request, reply) => {
+    const auth = guard(request, 'property:write');
+    const body = request.body as Record<string, unknown>;
+    const property = (body.property ?? {}) as Record<string, unknown>;
+    const units = Array.isArray(body.units) ? (body.units as Record<string, unknown>[]) : [];
+    const result = onboardProperty(options.db, {
+      orgId: assertOrg(auth.orgId, (body.orgId as string | undefined) ?? null),
+      property: {
+        name: requireString(property, 'name'),
+        city: property.city as string | undefined,
+        state: property.state as string | undefined,
+        address: property.address as string | undefined,
+        ownerName: property.ownerName as string | undefined,
+        ownerEmail: property.ownerEmail as string | undefined,
+        ownerSharePct: optionalNumber(property.ownerSharePct),
+      },
+      units: units.map((unit) => ({
+        name: requireString(unit, 'name'),
+        inventory: optionalNumber(unit.inventory),
+        capacity: optionalNumber(unit.capacity),
+        basePriceCents: optionalNumber(unit.basePriceCents) ?? 0,
+        cleaningFeeCents: optionalNumber(unit.cleaningFeeCents),
+        weekendUpliftPct: optionalNumber(unit.weekendUpliftPct),
+        minStay: optionalNumber(unit.minStay),
+        amenities: unit.amenities,
+        checkinFrom: unit.checkinFrom as string | undefined,
+        checkoutUntil: unit.checkoutUntil as string | undefined,
+        houseRules: unit.houseRules as string | undefined,
+      })),
+    });
+    return reply.code(201).send(result);
+  });
+
+  app.post('/v1/units/:id/duplicate', async (request, reply) => {
+    const auth = guard(request, 'unit:write');
+    const { id } = request.params as { id: string };
+    assertUnitAccess(options.db, auth.orgId, id);
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const result = duplicateUnit(options.db, { orgId: auth.orgId, unitId: id, name: body.name as string | undefined });
+    return reply.code(201).send(result);
+  });
+
+  app.patch('/v1/units/:id', async (request) => {
+    const auth = guard(request, 'unit:write');
+    const { id } = request.params as { id: string };
+    assertUnitAccess(options.db, auth.orgId, id);
+    const body = request.body as Record<string, unknown>;
+    return updateUnitDetails(options.db, {
+      orgId: auth.orgId,
+      unitId: id,
+      capacity: optionalNumber(body.capacity),
+      checkinFrom: body.checkinFrom as string | undefined,
+      checkoutUntil: body.checkoutUntil as string | undefined,
+      houseRules: body.houseRules as string | undefined,
+    });
+  });
+
+  app.put('/v1/units/:id/amenities', async (request) => {
+    const auth = guard(request, 'unit:write');
+    const { id } = request.params as { id: string };
+    assertUnitAccess(options.db, auth.orgId, id);
+    const body = request.body as Record<string, unknown>;
+    const codes = body.codes;
+    const amenities = normalizeAmenities(codes);
+    setAmenities(options.db, id, amenities);
+    return { unitId: id, amenities };
+  });
+
+  // ───────────────────────────── fotos ─────────────────────────────
+
+  app.post('/v1/units/:id/photos', async (request, reply) => {
+    const auth = guard(request, 'unit:write');
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown>;
+    const photo = storePhoto(options.db, { storageDir }, {
+      orgId: auth.orgId,
+      unitId: id,
+      dataBase64: requireString(body, 'dataBase64'),
+      declaredType: body.contentType as string | undefined,
+    });
+    return reply.code(201).send(photo);
+  });
+
+  app.get('/v1/units/:id/photos', async (request) => {
+    const auth = guard(request, 'org:read');
+    const { id } = request.params as { id: string };
+    return listUnitPhotos(options.db, auth.orgId, id);
+  });
+
+  /** Imagem precisa aceitar token na query: <img src> não envia header. */
+  app.get('/v1/photos/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const query = request.query as { t?: string };
+    const token = query.t ?? (request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : null);
+    const auth = token ? resolveToken(options.db, token) : null;
+    if (!auth) throw new UnauthorizedError('informe ?t=<token> para carregar a imagem');
+
+    const file = readPhoto(options.db, { storageDir }, id);
+    const photo = options.db.prepare('SELECT unit_id FROM unit_photos WHERE id = ?').get(id) as { unit_id?: string } | undefined;
+    if (!photo?.unit_id) throw new NotFoundError(`foto não encontrada: ${id}`);
+    requireUnitInOrg(options.db, auth.orgId, photo.unit_id);
+
+    return reply
+      .header('content-type', file.contentType)
+      .header('cache-control', 'private, max-age=3600')
+      .header('etag', `"${file.sha256}"`)
+      .send(file.bytes);
+  });
+
+  app.delete('/v1/photos/:id', async (request, reply) => {
+    const auth = guard(request, 'unit:write');
+    const { id } = request.params as { id: string };
+    removePhoto(options.db, { storageDir }, { orgId: auth.orgId, photoId: id });
+    return reply.code(204).send();
+  });
+
+  // ───────────────────────────── financeiro ─────────────────────────────
+
+  app.get('/v1/finance/payouts', async (request) => {
+    const auth = guard(request, 'finance:read');
+    const { from, to, propertyId } = request.query as { from?: string; to?: string; propertyId?: string };
+    if (!from || !to) badRequest('queries obrigatórias: from, to');
+    return payoutReport(options.db, assertOrg(auth.orgId, null), { from, to, propertyId });
+  });
+
+  app.get('/v1/reconciliation', async (request) => {
+    const auth = guard(request, 'finance:read');
+    const { from, to } = request.query as { from?: string; to?: string };
+    if (!from || !to) badRequest('queries obrigatórias: from, to');
+    return reconcileOrg(options.db, assertOrg(auth.orgId, null), { from, to });
   });
 
   // ───────────────────────────── reservas ─────────────────────────────
