@@ -21,6 +21,10 @@ const state = {
   channels: [],
   summary: null,
   dayEditor: null,
+  amenities: [],
+  photos: [],
+  finance: null,
+  reconciliation: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -49,6 +53,10 @@ const pt = (value) => PT[value] ?? String(value).replace(/_/g, ' ');
 
 const brl = (cents) =>
   (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+
+/** Financeiro não arredonda: centavo perdido em repasse é disputa com proprietário. */
+const brlExact = (cents) =>
+  (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 
 const iso = (d) => d.toISOString().slice(0, 10);
 const addDays = (dateStr, n) => {
@@ -203,6 +211,8 @@ function renderShell() {
             <button class="tab" data-tab="reservations">Reservas</button>
             <button class="tab" data-tab="tasks">Tarefas</button>
             <button class="tab" data-tab="channels">Canais</button>
+            <button class="tab" data-tab="onboarding">Onboarding</button>
+            <button class="tab" data-tab="finance">Financeiro</button>
           </div>
         </header>
         <main class="content" id="content"></main>
@@ -542,6 +552,292 @@ function renderChannels() {
   });
 }
 
+
+// ───────────────────────────── onboarding ─────────────────────────────
+
+async function loadAmenities() {
+  if (state.amenities.length === 0) state.amenities = await api('/v1/amenities');
+}
+
+function renderOnboarding() {
+  const unit = state.unit;
+  const checked = new Set(unit?.amenities ?? []);
+  const groups = ['essencial', 'conforto', 'exterior', 'familia'];
+  const chips = groups
+    .map(
+      (group) => `<div style="margin-bottom:10px">
+        <div class="hint" style="text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">${group}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${state.amenities
+            .filter((amenity) => amenity.group === group)
+            .map(
+              (amenity) => `<label class="cap" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0">
+                <input type="checkbox" data-amenity="${amenity.code}" ${checked.has(amenity.code) ? 'checked' : ''} style="width:auto" />
+                ${amenity.label}
+              </label>`,
+            )
+            .join('')}
+        </div>
+      </div>`,
+    )
+    .join('');
+
+  $('#content').replaceChildren(
+    el(`<div style="display:grid;grid-template-columns:1.1fr .9fr;gap:16px;align-items:start">
+      <div class="card">
+        <div class="card-head"><h2>Novo imóvel</h2><span class="muted" style="font-size:12px">imóvel + unidades + tarifa</span></div>
+        <div style="padding:14px 16px;display:grid;gap:10px">
+          <div class="row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label>Nome do imóvel</label><input id="obName" placeholder="Casa Praia do Forte" /></div>
+            <div><label>Cidade</label><input id="obCity" placeholder="Mata de São João" /></div>
+          </div>
+          <div class="row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label>Proprietário</label><input id="obOwner" placeholder="Nome do proprietário" /></div>
+            <div><label>Repasse ao proprietário (%)</label><input id="obShare" type="number" min="0" max="100" value="70" /></div>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--line);margin:6px 0" />
+          <div class="row" style="display:grid;grid-template-columns:1.4fr .6fr;gap:10px">
+            <div><label>Unidade</label><input id="obUnit" placeholder="Suíte Aurora" /></div>
+            <div><label>Capacidade</label><input id="obCapacity" type="number" min="1" value="2" /></div>
+          </div>
+          <div class="row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div><label>Preço/noite (R$)</label><input id="obPrice" type="number" min="0" step="10" value="450" /></div>
+            <div><label>Limpeza (R$)</label><input id="obCleaning" type="number" min="0" step="10" value="150" /></div>
+            <div><label>Mín. noites</label><input id="obMinStay" type="number" min="1" value="2" /></div>
+          </div>
+          <button class="btn btn-primary" id="obCreate">Criar imóvel</button>
+          <div class="hint">A unidade nasce com tarifa padrão e fica pronta para receber fotos e ser publicada num canal.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>${unit ? unit.name : 'Selecione uma unidade'}</h2>
+          <button class="btn btn-sm" id="obDuplicate" ${unit ? '' : 'disabled'}>Duplicar unidade</button></div>
+        <div style="padding:14px 16px;display:grid;gap:12px">
+          ${unit ? chips : '<div class="empty">Escolha uma unidade na coluna à esquerda.</div>'}
+          ${unit ? '<button class="btn" id="obSaveAmenities">Salvar comodidades</button>' : ''}
+          <hr style="border:none;border-top:1px solid var(--line);margin:4px 0" />
+          <div>
+            <label>Fotos</label>
+            <input id="obPhoto" type="file" accept="image/jpeg,image/png,image/webp" ${unit ? '' : 'disabled'} />
+            <div class="hint">JPEG, PNG ou WebP até 8 MB. Conteúdo idêntico não duplica.</div>
+          </div>
+          <div id="obPhotos" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        </div>
+      </div>
+    </div>`),
+  );
+
+  if (unit) {
+    void loadPhotos(unit.id);
+    $('#obSaveAmenities')?.addEventListener('click', async () => {
+      try {
+        const codes = [...document.querySelectorAll('[data-amenity]:checked')].map((node) => node.dataset.amenity);
+        await api(`/v1/units/${unit.id}/amenities`, { method: 'PUT', body: { codes } });
+        await refreshUnits();
+        toast('Comodidades atualizadas');
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    $('#obDuplicate')?.addEventListener('click', async () => {
+      try {
+        const result = await api(`/v1/units/${unit.id}/duplicate`, { method: 'POST', body: { name: `${unit.name} 2` } });
+        await refreshUnits();
+        toast(`Unidade criada com ${result.copiedRatePlans} tarifa(s) e ${result.copiedAmenities} comodidade(s)`);
+        void renderOnboarding();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    $('#obPhoto')?.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const dataBase64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+          reader.onerror = () => reject(new Error('falha ao ler o arquivo'));
+          reader.readAsDataURL(file);
+        });
+        await api(`/v1/units/${unit.id}/photos`, {
+          method: 'POST',
+          body: { dataBase64, contentType: file.type },
+        });
+        await loadPhotos(unit.id);
+        toast('Foto enviada');
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+
+  $('#obCreate')?.addEventListener('click', async () => {
+    try {
+      const body = {
+        property: {
+          name: $('#obName').value || 'Novo imóvel',
+          city: $('#obCity').value || null,
+          ownerName: $('#obOwner').value || null,
+          ownerSharePct: Number($('#obShare').value) || 70,
+        },
+        units: [
+          {
+            name: $('#obUnit').value || 'Unidade 1',
+            capacity: Number($('#obCapacity').value) || 2,
+            basePriceCents: Math.round(Number($('#obPrice').value || 0) * 100),
+            cleaningFeeCents: Math.round(Number($('#obCleaning').value || 0) * 100),
+            minStay: Number($('#obMinStay').value) || 2,
+          },
+        ],
+      };
+      const result = await api('/v1/onboarding', { method: 'POST', body });
+      await reloadWorkspace(result.propertyId, result.units[0]?.id);
+      toast('Imóvel criado — unidade pronta para publicar');
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
+}
+
+async function loadPhotos(unitId) {
+  try {
+    const photos = await api(`/v1/units/${unitId}/photos`);
+    const container = $('#obPhotos');
+    if (!container) return;
+    container.innerHTML = photos.length
+      ? photos
+          .map(
+            (photo) => `<div style="position:relative">
+              <img src="${photo.url}?t=${encodeURIComponent(state.token)}" alt="" width="96" height="72"
+                   style="object-fit:cover;border-radius:6px;border:1px solid var(--line)" />
+              <button class="btn btn-sm" data-del-photo="${photo.id}"
+                      style="position:absolute;top:-8px;right:-8px;padding:0 6px;line-height:18px">×</button>
+            </div>`,
+          )
+          .join('')
+      : '<div class="hint">Nenhuma foto ainda.</div>';
+    container.querySelectorAll('[data-del-photo]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        try {
+          await api(`/v1/photos/${button.dataset.delPhoto}`, { method: 'DELETE' });
+          await loadPhotos(unitId);
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+    });
+  } catch {
+    /* silencioso: foto é enriquecimento, não bloqueia o onboarding */
+  }
+}
+
+// ───────────────────────────── financeiro ─────────────────────────────
+
+async function renderFinance() {
+  const from = state.calStart;
+  const to = addDays(from, 120);
+  const [finance, reconciliation] = await Promise.all([
+    api(`/v1/finance/payouts?from=${from}&to=${to}`),
+    api(`/v1/reconciliation?from=${from}&to=${to}`),
+  ]);
+  state.finance = finance;
+  state.reconciliation = reconciliation;
+
+  const rows = finance.properties
+    .map(
+      (entry) => `<tr>
+        <td class="k">${entry.propertyName}</td>
+        <td>${entry.ownerName ?? '—'}</td>
+        <td class="num">${brlExact(entry.payout.grossCents)}</td>
+        <td class="num muted">−${brlExact(entry.payout.commissionCents)}</td>
+        <td class="num">${brlExact(entry.payout.netCents)}</td>
+        <td class="num">${entry.ownerSharePct}%</td>
+        <td class="num k">${brlExact(entry.payout.ownerPayableCents)}</td>
+      </tr>`,
+    )
+    .join('');
+
+  const channels = finance.channels
+    .map(
+      (row) => `<tr>
+        <td class="k">${row.channel}</td>
+        <td class="num">${brlExact(row.grossCents)}</td>
+        <td class="num muted">−${brlExact(row.commissionCents)}</td>
+        <td class="num">${brlExact(row.netCents)}</td>
+        <td class="num">${row.netMarginPct}%</td>
+      </tr>`,
+    )
+    .join('');
+
+  const issues = reconciliation.issues.length
+    ? reconciliation.issues
+        .map(
+          (issue) => `<tr>
+            <td><span class="badge ${issue.severity === 'critical' ? 'cancelled' : 'pending'}">${issue.severity}</span></td>
+            <td class="k">${issue.kind.replace(/_/g, ' ')}</td>
+            <td>${issue.message}</td>
+          </tr>`,
+        )
+        .join('')
+    : '';
+
+  $('#content').replaceChildren(
+    el(`<div style="display:grid;gap:16px">
+      <div class="kpis">
+        <div class="kpi"><div class="n">${brlExact(finance.totals.grossCents)}</div><div class="l">bruto no período</div></div>
+        <div class="kpi"><div class="n">${brlExact(finance.totals.netCents)}</div><div class="l">líquido após comissões</div></div>
+        <div class="kpi"><div class="n">${brlExact(finance.totals.ownerPayableCents)}</div><div class="l">repasse a proprietários</div></div>
+        <div class="kpi"><div class="n">${finance.totals.nights}</div><div class="l">noites vendidas</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Repasse por proprietário</h2>
+          <span class="muted" style="font-size:12px">${finance.from} → ${finance.to}</span></div>
+        <table><thead><tr><th>Imóvel</th><th>Proprietário</th><th class="num">Bruto</th><th class="num">Comissão</th><th class="num">Líquido</th><th class="num">%</th><th class="num">Repasse</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Margem por canal</h2></div>
+        <table><thead><tr><th>Canal</th><th class="num">Bruto</th><th class="num">Comissão</th><th class="num">Líquido</th><th class="num">Margem</th></tr></thead>
+        <tbody>${channels || '<tr><td colspan="5" class="muted">Sem reservas no período.</td></tr>'}</tbody></table>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Reconciliação</h2>
+          <span class="muted" style="font-size:12px">${reconciliation.counts.critical} crítico(s) · ${reconciliation.counts.warning} aviso(s)</span></div>
+        ${
+          issues
+            ? `<table><thead><tr><th>Severidade</th><th>Problema</th><th>Detalhe</th></tr></thead><tbody>${issues}</tbody></table>`
+            : '<div class="empty">Nada inconsistente no período: reservas, lançamentos e anúncios conferem.</div>'
+        }
+      </div>
+    </div>`),
+  );
+}
+
+async function refreshUnits() {
+  state.units = [];
+  for (const property of state.properties) {
+    const units = await api(`/v1/properties/${property.id}/units`);
+    state.units.push(...units);
+  }
+  state.unit = state.units.find((unit) => unit.id === state.unit?.id) ?? state.units[0] ?? null;
+  renderTree();
+}
+
+async function reloadWorkspace(propertyId, unitId) {
+  state.properties = await api('/v1/properties');
+  await refreshUnits();
+  if (unitId) state.unit = state.units.find((unit) => unit.id === unitId) ?? state.unit;
+  renderTree();
+  await renderContent();
+  void propertyId;
+}
+
 // ───────────────────────────── orquestração ─────────────────────────────
 
 async function renderContent() {
@@ -550,6 +846,8 @@ async function renderContent() {
     reservations: ['Reservas', 'todas as origens, com status e comissão'],
     tasks: ['Tarefas', 'limpeza, check-in e check-out gerados por reserva'],
     channels: ['Canais', 'capacidades declaradas e estado de certificação'],
+    onboarding: ['Onboarding', 'cadastrar imóvel, unidades, comodidades e fotos'],
+    finance: ['Financeiro', 'repasse a proprietário, margem por canal e reconciliação'],
   };
   const [title, sub] = titles[state.tab];
   $('#viewTitle').textContent = title;
@@ -562,6 +860,8 @@ async function renderContent() {
   if (state.tab === 'reservations') renderReservations();
   if (state.tab === 'tasks') renderTasks();
   if (state.tab === 'channels') renderChannels();
+  if (state.tab === 'onboarding') renderOnboarding();
+  if (state.tab === 'finance') await renderFinance();
 }
 
 async function loadData() {
@@ -588,6 +888,7 @@ async function boot() {
   state.unit = state.units[0] ?? null;
   state.calStart = iso(new Date());
   await loadData();
+  await loadAmenities();
   if (state.unit) await loadCalendar();
   renderShell();
   renderTree();
