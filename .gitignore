@@ -4,3 +4,5 @@ data/
 *.log
 .env
 .DS_Store
+.dev-token
+preview-ui/

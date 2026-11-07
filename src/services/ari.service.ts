@@ -3,6 +3,7 @@ import type { Db } from '../db/database.ts';
 import { transaction } from '../db/database.ts';
 import {
   createBlock,
+  getUnit,
   enqueue,
   getListing,
   listCalendarOverrides,
@@ -13,6 +14,7 @@ import {
   type CalendarUpsert,
 } from '../db/repositories.ts';
 import { assertDate, eachDate } from '../domain/dates.ts';
+import { NotFoundError, ValidationError } from '../errors.ts';
 import type { DateString } from '../domain/types.ts';
 
 export interface AriDayInput {
@@ -38,6 +40,15 @@ export function setAri(
 ): { daysWritten: number; events: number } {
   if (input.days.length === 0) return { daysWritten: 0, events: 0 };
   for (const day of input.days) assertDate(day.date);
+
+  const unit = getUnit(db, input.unitId);
+  if (!unit) throw new NotFoundError(`unidade não encontrada: ${input.unitId}`);
+  const overflow = input.days.find((d) => d.available !== null && d.available !== undefined && d.available > unit.inventory);
+  if (overflow) {
+    throw new ValidationError(
+      `disponibilidade ${overflow.available} excede o inventário de ${unit.inventory} em ${overflow.date}`,
+    );
+  }
 
   const listings = listPublishedListingsByUnit(db, input.unitId);
 

@@ -120,3 +120,17 @@ test('intervalo vazio ou invertido é rejeitado', () => {
   assert.throws(() => computeAvailability({ ...base, from: '2026-03-12', to: '2026-03-10', reservations: [] }));
   assert.deepEqual(computeAvailability({ ...base, from: '2026-03-10', to: '2026-03-10', reservations: [] }), []);
 });
+
+
+test('override de disponibilidade não pode passar do inventário', () => {
+  const days = computeAvailability({
+    ...base,
+    inventory: 1,
+    from: '2026-03-10',
+    to: '2026-03-11',
+    overrides: [
+      { unitId: 'u1', date: '2026-03-10', available: 5, rateCents: null, minStay: null, closed: false, updatedAt: '' },
+    ],
+  });
+  assert.equal(days[0]?.available, 1, 'edição manual não pode vender o que não existe');
+});

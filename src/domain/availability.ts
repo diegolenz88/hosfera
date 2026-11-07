@@ -58,7 +58,9 @@ export function computeAvailability(input: AvailabilityInput): DayAvailability[]
     const reserved = reservedByDay.get(key) ?? 0;
     const closed = Boolean(override?.closed);
     const blocked = blockedDays.has(key) || closed;
-    const baseAvailable = override?.available ?? input.inventory;
+    // Override nunca aumenta o inventário: é a defesa contra overbooking por
+    // edição manual no calendário.
+    const baseAvailable = Math.min(override?.available ?? input.inventory, input.inventory);
     const available = blocked ? 0 : Math.max(0, baseAvailable - reserved);
     return {
       date,
