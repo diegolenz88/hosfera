@@ -130,6 +130,7 @@ function renderLogin() {
           <div style="margin-top:10px;display:grid;gap:8px">
             <input id="orgName" placeholder="Nome da administradora" value="Administradora Demo" />
             <input id="userName" placeholder="Seu nome" value="Operador" />
+            <input id="bootKey" placeholder="chave de bootstrap (HOSFERA_BOOTSTRAP)" />
             <button class="btn btn-gold btn-full" id="bootstrap">Criar e entrar</button>
             <div class="hint">Usa a chave de bootstrap do servidor. Em produção este caminho fica desabilitado.</div>
           </div>
@@ -157,7 +158,7 @@ function renderLogin() {
     try {
       const res = await fetch('/v1/bootstrap', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bootstrap-key': 'dev-bootstrap' },
+        headers: { 'content-type': 'application/json', 'x-bootstrap-key': $('#bootKey')?.value.trim() ?? '' },
         body: JSON.stringify({ orgName: $('#orgName').value, userName: $('#userName').value }),
       });
       const data = await res.json();
@@ -896,6 +897,15 @@ async function boot() {
 }
 
 (async () => {
+  // Conveniência de demonstração: /?t=<token> entra direto e apaga o token da
+  // barra de endereço, para ele não sobrar no histórico nem em print de tela.
+  const urlToken = new URLSearchParams(location.search).get('t');
+  if (urlToken) {
+    state.token = urlToken.trim();
+    localStorage.setItem('hosfera.token', state.token);
+    history.replaceState({}, '', location.pathname);
+  }
+
   if (!state.token) return renderLogin();
   try {
     await boot();
