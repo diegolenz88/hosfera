@@ -56,6 +56,7 @@ import {
 import type { Channel, ReservationStatus } from '../domain/types.ts';
 import { CHANNELS } from '../domain/types.ts';
 import { assertDate } from '../domain/dates.ts';
+import { VERSION } from '../version.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(HERE, '..', '..', 'public');
@@ -206,7 +207,7 @@ export function createApp(options: AppOptions): FastifyInstance {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'hosfera',
-    version: '0.2.0',
+    version: VERSION,
     env: cfg.env,
     channels: registry.list().map((adapter) => adapter.channel),
     outbox: outboxStats(options.db),

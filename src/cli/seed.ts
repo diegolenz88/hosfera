@@ -25,6 +25,7 @@ import { setAmenities } from '../db/repositories.ts';
 import { setAri } from '../services/ari.service.ts';
 import { Dispatcher } from '../services/dispatcher.service.ts';
 import { createToken, listTokens } from '../auth/tokens.ts';
+import { ingestReservation } from '../services/reservation.service.ts';
 import { addDays, todayUtc } from '../domain/dates.ts';
 
 const ORG_NAME = 'Administradora Demo';
@@ -146,6 +147,42 @@ void bookingListing;
 const dispatcher = new Dispatcher(db, registry, { maxAttempts: 6, baseBackoffMs: 500 });
 const report = await dispatcher.runOnce();
 console.log('outbox processado:', report);
+
+// Uma reserva de demonstração deixa o calendário, o financeiro e as tarefas
+// com conteúdo real — cenário vazio não mostra o produto.
+const reservationCount = db.prepare('SELECT COUNT(*) AS total FROM reservations WHERE org_id = ?').get(org.id) as {
+  total: number;
+};
+const publishedListing = db
+  .prepare("SELECT external_id FROM listings WHERE unit_id = ? AND status = 'published' LIMIT 1")
+  .get(suite.id) as { external_id?: string } | undefined;
+
+if (Number(reservationCount.total) === 0 && publishedListing?.external_id) {
+  const mock = registry.get('mock') as unknown as { sign: (body: string) => string };
+  const payload = {
+    externalId: 'DEMO-1001',
+    externalListingId: publishedListing.external_id,
+    checkin: addDays(start, 40),
+    checkout: addDays(start, 43),
+    guests: 4,
+    guestName: 'Hóspede Demo',
+    guestEmail: 'hospede@example.com',
+    status: 'confirmed',
+    totalCents: 168_000,
+    commissionCents: 25_200,
+    currency: 'BRL',
+  };
+  const rawBody = JSON.stringify(payload);
+  ingestReservation(db, registry, {
+    channel: 'mock',
+    connectionId: mockConnection.id,
+    headers: { 'x-mock-signature': mock.sign(rawBody), 'content-type': 'application/json' },
+    rawBody,
+    raw: payload,
+  });
+  const after = await dispatcher.runOnce();
+  console.log('reserva de demonstração criada (DEMO-1001) · outbox:', after);
+}
 
 const unitCount = db.prepare('SELECT COUNT(*) AS total FROM units WHERE property_id = ?').get(property.id) as { total: number };
 const listingCount = db.prepare('SELECT COUNT(*) AS total FROM listings WHERE unit_id IN (?, ?)').get(suite.id, loft.id) as {

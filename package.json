@@ -1,6 +1,6 @@
 {
   "name": "hosfera",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "hosfera — PMS + channel manager para aluguel por temporada",
@@ -13,7 +13,10 @@
     "test": "node --test tests/",
     "typecheck": "tsc --noEmit",
     "seed": "node src/cli/seed.ts",
-    "smoke": "node src/cli/smoke.ts"
+    "smoke": "node src/cli/smoke.ts",
+    "doctor": "node scripts/doctor.ts",
+    "check": "npm run doctor && npm run typecheck && npm test && npm run smoke",
+    "reset": "node -e \"require('node:fs').rmSync('./data',{recursive:true,force:true});console.log('banco local apagado')\""
   },
   "dependencies": {
     "fast-xml-parser": "^5.12.0",
