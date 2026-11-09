@@ -114,7 +114,7 @@ RBAC). Não toca no seu banco.
 | --- | --- |
 | `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` | Node < 24. `node -v` e reinstale. |
 | `Cannot find module 'fastify'` | Faltou `npm install` na pasta certa. |
-| `EADDRINUSE :::3000` | Porta ocupada: `PORT=3100 npm start` (Windows: `set PORT=3100&& npm start`). |
+| `EADDRINUSE :::3000` | Porta ocupada: escolha outra com `PORT=8090 npm start` (Windows: `set PORT=8090&& npm start`). A porta vem da variável `PORT` no `.env`. |
 | `ExperimentalWarning: SQLite` | Aviso normal do `node:sqlite`. Não é erro. |
 | Login recusa o token | O token do seed foi impresso uma vez; use `cat data/.dev-token` ou crie outro em *Ambiente local*. |
 | Quero recomeçar do zero | `npm run reset` (apaga `data/`) e rode `npm run seed` de novo. |
