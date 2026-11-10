@@ -1,8 +1,11 @@
 # hosfera
 
-PMS + channel manager para aluguel por temporada. Este repositório é o início da
-plataforma descrita em `propostas/hosfera/` (benchmark, brief, especificação e
-planejamento): o **núcleo canônico** e a **camada de conectividade** funcionando
+[![ci](https://github.com/diegolenz88/hosfera/actions/workflows/ci.yml/badge.svg)](https://github.com/diegolenz88/hosfera/actions/workflows/ci.yml)
+
+PMS + channel manager para aluguel por temporada. A documentação de benchmark,
+brief, especificação e planejamento está em `docs/` (ADRs) e no pacote de
+documentos da série hosfera; este repositório é o **núcleo canônico** e a
+**camada de conectividade** funcionando
 de ponta a ponta, com um canal de desenvolvimento que exercita o fluxo completo
 sem depender de credencial de OTA.
 
@@ -26,7 +29,7 @@ sem depender de credencial de OTA.
 
 | Área | Estado |
 | --- | --- |
-| Domínio (disponibilidade, preço, reserva, tarefas) | funcional, 65 testes |
+| Domínio (disponibilidade, preço, reserva, tarefas) | funcional, coberto por 140 testes |
 | Persistência | SQLite via `node:sqlite`, esquema canônico |
 | Channel manager (outbox, retry, dead-letter, auditoria) | funcional |
 | Canal `mock` (desenvolvimento) | funcional, com webhook assinado |
