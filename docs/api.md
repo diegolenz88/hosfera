@@ -215,3 +215,23 @@ curl -s "$H/v1/reconciliation?from=2026-12-01&to=2026-12-31" -H "x-api-key: $K"
 `payouts` devolve `totals`, uma linha por imóvel (bruto, comissão, líquido,
 percentual, repasse) e `channels` com margem líquida por canal.
 `reconciliation` devolve `{ counts, issues }`, com `severity` `critical` ou `warning`.
+
+
+## Sincronização por iCal
+
+```bash
+# 1. cadastrar o feed que o canal exporta
+curl -s -X POST $H/v1/units/<id>/ical-sources -H "x-api-key: $K" -H 'content-type: application/json' \
+  -d '{"url":"https://www.airbnb.com.br/calendar/ical/12345.ics","label":"Airbnb — Suíte Aurora"}'
+
+# 2. sincronizar (idempotente por UID; evento cancelado libera a noite)
+curl -s -X POST $H/v1/ical-sources/<sourceId>/sync -H "x-api-key: $K"
+
+# 3. pegar o endereço que o canal assina (público, sem login)
+curl -s $H/v1/units/<id>/ical-feed -H "x-api-key: $K"
+# → { "url": "/v1/ical/ifs_....ics", "token": "ifs_..." }
+```
+
+O feed exportado lista reservas ativas e bloqueios manuais. Bloqueio vindo de
+iCal **não** volta no feed: reexportar criaria eco e, com dois canais, um loop de
+bloqueios.

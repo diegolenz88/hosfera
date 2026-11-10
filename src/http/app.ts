@@ -33,6 +33,9 @@ import {
   listReservations,
   listTasks,
   listAmenities,
+  listIcalSources,
+  getIcalSource,
+  unitIdForFeedToken,
   listUnits,
   outboxStats,
   setAmenities,
@@ -44,6 +47,14 @@ import { onboardProperty, duplicateUnit, updateUnitDetails } from '../services/o
 import { listUnitPhotos, readPhoto, removePhoto, storePhoto, requireUnitInOrg } from '../services/photo.service.ts';
 import { payoutReport } from '../services/finance.service.ts';
 import { reconcileOrg } from '../services/reconciliation.service.ts';
+import {
+  addIcalSource,
+  exportUnitFeed,
+  feedTokenFor,
+  importFeedText,
+  removeIcalSource,
+  syncIcalSource,
+} from '../services/ical.service.ts';
 import { can, permissionsFor, type Action } from '../auth/permissions.ts';
 import {
   assertConnectionAccess,
@@ -94,7 +105,17 @@ const optionalNumber = (value: unknown): number | undefined =>
   value === undefined || value === null || value === '' ? undefined : Number(value);
 
 /** Rotas que não exigem token (webhook se autentica por assinatura; UI é pública). */
-const PUBLIC_PATHS = ['/health', '/v1/bootstrap', '/v1/webhooks/', '/v1/photos/', '/', '/index.html', '/app.js', '/styles.css'];
+const PUBLIC_PATHS = [
+  '/health',
+  '/v1/bootstrap',
+  '/v1/webhooks/',
+  '/v1/photos/',
+  '/v1/ical/',
+  '/',
+  '/index.html',
+  '/app.js',
+  '/styles.css',
+];
 
 export function createApp(options: AppOptions): FastifyInstance {
   const cfg = options.config ?? defaultConfig;
@@ -418,6 +439,79 @@ export function createApp(options: AppOptions): FastifyInstance {
       reason: (body.reason as string | undefined) ?? undefined,
     });
     return reply.code(201).send(result);
+  });
+
+  // ───────────────────────────── iCal (sincronização de agenda) ─────────────────────────────
+
+  app.get('/v1/units/:id/ical-sources', async (request) => {
+    const auth = guard(request, 'org:read');
+    const { id } = request.params as { id: string };
+    assertUnitAccess(options.db, auth.orgId, id);
+    return listIcalSources(options.db, id);
+  });
+
+  app.post('/v1/units/:id/ical-sources', async (request, reply) => {
+    const auth = guard(request, 'connection:write');
+    const { id } = request.params as { id: string };
+    assertUnitAccess(options.db, auth.orgId, id);
+    const body = request.body as Record<string, unknown>;
+    const source = addIcalSource(options.db, {
+      orgId: auth.orgId,
+      unitId: id,
+      url: requireString(body, 'url'),
+      label: (body.label as string | undefined) ?? null,
+    });
+    return reply.code(201).send(source);
+  });
+
+  app.post('/v1/ical-sources/:id/sync', async (request) => {
+    const auth = guard(request, 'connection:write');
+    const { id } = request.params as { id: string };
+    const source = getIcalSource(options.db, id);
+    if (!source) throw new NotFoundError(`fonte iCal não encontrada: ${id}`);
+    assertUnitAccess(options.db, auth.orgId, source.unitId);
+    return syncIcalSource(options.db, id);
+  });
+
+  app.delete('/v1/ical-sources/:id', async (request) => {
+    const auth = guard(request, 'connection:write');
+    const { id } = request.params as { id: string };
+    const source = getIcalSource(options.db, id);
+    if (!source) throw new NotFoundError(`fonte iCal não encontrada: ${id}`);
+    assertUnitAccess(options.db, auth.orgId, source.unitId);
+    return removeIcalSource(options.db, id);
+  });
+
+  // Importa texto colado — usado pelos testes e por quem só tem o .ics em mãos.
+  app.post('/v1/units/:id/ical-import', async (request) => {
+    const auth = guard(request, 'connection:write');
+    const { id } = request.params as { id: string };
+    assertUnitAccess(options.db, auth.orgId, id);
+    const body = request.body as Record<string, unknown>;
+    const sourceId = requireString(body, 'sourceId');
+    const text = requireString(body, 'text');
+    return importFeedText(options.db, { unitId: id, sourceId, text });
+  });
+
+  app.get('/v1/units/:id/ical-feed', async (request) => {
+    const auth = guard(request, 'org:read');
+    const { id } = request.params as { id: string };
+    assertUnitAccess(options.db, auth.orgId, id);
+    const token = feedTokenFor(options.db, id);
+    return { url: `/v1/ical/${token}.ics`, token };
+  });
+
+  // Canal assina sem login: o token é a credencial e só expõe noites ocupadas.
+  app.get('/v1/ical/:token.ics', async (request, reply) => {
+    const { token } = request.params as { token: string };
+    const unitId = unitIdForFeedToken(options.db, token);
+    if (!unitId) throw new NotFoundError('feed não encontrado');
+    const feed = exportUnitFeed(options.db, unitId);
+    return reply
+      .header('content-type', 'text/calendar; charset=utf-8')
+      .header('content-disposition', `inline; filename="${unitId}.ics"`)
+      .header('cache-control', 'no-cache')
+      .send(feed.body);
   });
 
   // ───────────────────────────── conexões e anúncios ─────────────────────────────

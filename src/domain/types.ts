@@ -140,6 +140,22 @@ export interface Block {
   startDate: DateString;
   endDate: DateString;
   reason: string | null;
+  /** 'manual' ou `ical:<sourceId>` — quem criou o bloqueio. */
+  source: string;
+  /** UID do evento no feed de origem; null em bloqueio manual. */
+  externalUid: string | null;
+  createdAt: Timestamp;
+}
+
+export interface ICalSource {
+  id: Id;
+  orgId: Id;
+  unitId: Id;
+  url: string;
+  label: string | null;
+  lastSyncedAt: Timestamp | null;
+  lastStatus: string | null;
+  lastError: string | null;
   createdAt: Timestamp;
 }
 

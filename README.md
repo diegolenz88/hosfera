@@ -40,9 +40,10 @@ sem depender de credencial de OTA.
 | API HTTP | fastify, `Authorization: Bearer` |
 | UI operacional | calendário, reservas, tarefas, canais, onboarding e financeiro (sem build) |
 | Onboarding | imóvel + unidades + tarifa + comodidades em transação, duplicar unidade |
+| **iCal (integração real)** | importa calendário de Airbnb/Booking/Vrbo/Google como bloqueio e exporta feed público por unidade (ADR 0009) |
 | Fotos | upload validado por magic bytes, dedupe por hash, servidas com token |
 | Financeiro | repasse sobre o líquido, margem por canal, reconciliação de inconsistências |
-| Testes | 140 (domínio, contrato de adaptadores, OTA, fluxo HTTP, RBAC, onboarding, financeiro) |
+| Testes | 159 (domínio, contrato de adaptadores, OTA, fluxo HTTP, RBAC, onboarding, financeiro, iCal) |
 
 ## Requisitos
 
@@ -127,6 +128,10 @@ exemplos: [`docs/api.md`](docs/api.md).
 | POST/GET/DELETE | `/v1/units/:id/photos`, `/v1/photos/:id` | fotos do imóvel |
 | GET | `/v1/finance/payouts` | repasse por proprietário e margem por canal |
 | GET | `/v1/reconciliation` | inconsistências do período |
+| POST/GET | `/v1/units/:id/ical-sources` | feeds iCal importados da unidade |
+| POST | `/v1/ical-sources/:id/sync` | baixa o feed e aplica como bloqueio |
+| GET | `/v1/units/:id/ical-feed` | token e URL do feed de exportação |
+| GET | `/v1/ical/:token.ics` | feed público (sem login) que o canal assina |
 
 ## Estrutura
 
@@ -161,6 +166,7 @@ docs/
 - [ADR 0006 — migrations versionadas](docs/adr/0006-migrations-versionadas.md)
 - [ADR 0007 — Booking: protocolo implementado, homologação como gate](docs/adr/0007-booking-protocolo-homologacao.md)
 - [ADR 0008 — onboarding, fotos e repasse](docs/adr/0008-onboarding-fotos-repasse.md)
+- [ADR 0009 — iCal como primeira integração real](docs/adr/0009-ical-primeira-integracao.md)
 - [Checklist de ativação do Booking](docs/booking-activation.md)
 
 ## O que ainda não existe (honestamente)

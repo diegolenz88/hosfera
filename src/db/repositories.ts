@@ -9,6 +9,7 @@ import type {
   Currency,
   DateString,
   LedgerEntry,
+  ICalSource,
   Listing,
   Organization,
   OutboxEvent,
@@ -416,11 +417,140 @@ export function listCalendarOverrides(db: Db, unitId: string, from: DateString, 
   }));
 }
 
-export function createBlock(db: Db, input: Omit<Block, 'id' | 'createdAt'>): Block {
-  const block: Block = { ...input, id: id(), createdAt: nowIso() };
-  db.prepare('INSERT INTO blocks (id, unit_id, start_date, end_date, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(block.id, block.unitId, block.startDate, block.endDate, block.reason, block.createdAt);
+export function createBlock(
+  db: Db,
+  input: Omit<Block, 'id' | 'createdAt' | 'source' | 'externalUid'> &
+    Partial<Pick<Block, 'source' | 'externalUid'>>,
+): Block {
+  const block: Block = {
+    ...input,
+    source: input.source ?? 'manual',
+    externalUid: input.externalUid ?? null,
+    id: id(),
+    createdAt: nowIso(),
+  };
+  db.prepare(
+    'INSERT INTO blocks (id, unit_id, start_date, end_date, reason, source, external_uid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    block.id,
+    block.unitId,
+    block.startDate,
+    block.endDate,
+    block.reason,
+    block.source,
+    block.externalUid,
+    block.createdAt,
+  );
   return block;
+}
+
+export function updateBlockDates(
+  db: Db,
+  blockId: string,
+  input: { startDate: DateString; endDate: DateString; reason: string | null },
+): void {
+  db.prepare('UPDATE blocks SET start_date = ?, end_date = ?, reason = ? WHERE id = ?')
+    .run(input.startDate, input.endDate, input.reason, blockId);
+}
+
+export function deleteBlock(db: Db, blockId: string): void {
+  db.prepare('DELETE FROM blocks WHERE id = ?').run(blockId);
+}
+
+export function listBlocksBySource(db: Db, unitId: string, source: string): Block[] {
+  return (
+    db.prepare('SELECT * FROM blocks WHERE unit_id = ? AND source = ? ORDER BY start_date').all(unitId, source) as Row[]
+  ).map(mapBlock);
+}
+
+function mapBlock(row: Row): Block {
+  return {
+    id: str(row.id),
+    unitId: str(row.unit_id),
+    startDate: str(row.start_date),
+    endDate: str(row.end_date),
+    reason: strOrNull(row.reason),
+    source: str(row.source ?? 'manual'),
+    externalUid: strOrNull(row.external_uid),
+    createdAt: str(row.created_at),
+  };
+}
+
+export function listIcalSources(db: Db, unitId: string): ICalSource[] {
+  return (
+    db.prepare('SELECT * FROM ical_sources WHERE unit_id = ? ORDER BY created_at').all(unitId) as Row[]
+  ).map(mapIcalSource);
+}
+
+export function getIcalSource(db: Db, sourceId: string): ICalSource | null {
+  const row = db.prepare('SELECT * FROM ical_sources WHERE id = ?').get(sourceId) as Row | undefined;
+  return row ? mapIcalSource(row) : null;
+}
+
+function mapIcalSource(row: Row): ICalSource {
+  return {
+    id: str(row.id),
+    orgId: str(row.org_id),
+    unitId: str(row.unit_id),
+    url: str(row.url),
+    label: strOrNull(row.label),
+    lastSyncedAt: strOrNull(row.last_synced_at),
+    lastStatus: strOrNull(row.last_status),
+    lastError: strOrNull(row.last_error),
+    createdAt: str(row.created_at),
+  };
+}
+
+export function createIcalSource(
+  db: Db,
+  input: { orgId: string; unitId: string; url: string; label: string | null },
+): ICalSource {
+  const source: ICalSource = {
+    id: id(),
+    orgId: input.orgId,
+    unitId: input.unitId,
+    url: input.url,
+    label: input.label,
+    lastSyncedAt: null,
+    lastStatus: null,
+    lastError: null,
+    createdAt: nowIso(),
+  };
+  db.prepare(
+    'INSERT INTO ical_sources (id, org_id, unit_id, url, label, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(source.id, source.orgId, source.unitId, source.url, source.label, source.createdAt);
+  return source;
+}
+
+export function updateIcalSourceSync(
+  db: Db,
+  sourceId: string,
+  input: { status: string; error: string | null },
+): void {
+  db.prepare('UPDATE ical_sources SET last_synced_at = ?, last_status = ?, last_error = ? WHERE id = ?')
+    .run(nowIso(), input.status, input.error, sourceId);
+}
+
+export function deleteIcalSource(db: Db, sourceId: string): void {
+  db.prepare('DELETE FROM ical_sources WHERE id = ?').run(sourceId);
+}
+
+/** Token estável do feed de exportação; criado no primeiro pedido. */
+export function ensureUnitFeedToken(db: Db, unitId: string): string {
+  const row = db.prepare('SELECT token FROM unit_feeds WHERE unit_id = ?').get(unitId) as
+    | { token?: string }
+    | undefined;
+  if (row?.token) return row.token;
+  const token = `ifs_${randomUUID().replace(/-/g, '')}`;
+  db.prepare('INSERT INTO unit_feeds (unit_id, token, created_at) VALUES (?, ?, ?)').run(unitId, token, nowIso());
+  return token;
+}
+
+export function unitIdForFeedToken(db: Db, token: string): string | null {
+  const row = db.prepare('SELECT unit_id FROM unit_feeds WHERE token = ?').get(token) as
+    | { unit_id?: string }
+    | undefined;
+  return row?.unit_id ?? null;
 }
 
 export function listBlocks(db: Db, unitId: string, from: DateString, to: DateString): Block[] {
@@ -428,14 +558,7 @@ export function listBlocks(db: Db, unitId: string, from: DateString, to: DateStr
     db
       .prepare('SELECT * FROM blocks WHERE unit_id = ? AND end_date > ? AND start_date < ? ORDER BY start_date')
       .all(unitId, from, to) as Row[]
-  ).map((row) => ({
-    id: str(row.id),
-    unitId: str(row.unit_id),
-    startDate: str(row.start_date),
-    endDate: str(row.end_date),
-    reason: strOrNull(row.reason),
-    createdAt: str(row.created_at),
-  }));
+  ).map(mapBlock);
 }
 
 // ───────────────────────────── reservas ─────────────────────────────
