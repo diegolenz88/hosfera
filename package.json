@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node --watch src/main.ts",
     "start": "node src/main.ts",
-    "test": "node --test tests/",
+    "test": "node --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "seed": "node src/cli/seed.ts",
     "smoke": "node src/cli/smoke.ts",
