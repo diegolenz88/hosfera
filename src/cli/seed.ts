@@ -162,8 +162,8 @@ if (Number(reservationCount.total) === 0 && publishedListing?.external_id) {
   const payload = {
     externalId: 'DEMO-1001',
     externalListingId: publishedListing.external_id,
-    checkin: addDays(start, 40),
-    checkout: addDays(start, 43),
+    checkin: addDays(start, 5),
+    checkout: addDays(start, 8),
     guests: 4,
     guestName: 'Hóspede Demo',
     guestEmail: 'hospede@example.com',

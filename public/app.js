@@ -59,6 +59,8 @@ const brlExact = (cents) =>
 const nights = (checkin, checkout) =>
   Math.max(1, Math.round((Date.parse(`${checkout}T00:00:00Z`) - Date.parse(`${checkin}T00:00:00Z`)) / 86400000));
 
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
 const PT = {
   pending: 'pendente',
   confirmed: 'confirmada',
@@ -418,12 +420,23 @@ async function loadWorkspace() {
   }));
 }
 
+let reservationsCache = [];
+
 async function loadStructure() {
   state.me = await api('/v1/me');
   state.properties = await api('/v1/properties');
   const units = await Promise.all(state.properties.map((property) => api(`/v1/properties/${property.id}/units`)));
   state.units = units.flat();
-  state.unit = state.units.find((unit) => unit.id === state.unit?.id) ?? state.units[0] ?? null;
+  // Abrir na unidade com chegada mais próxima evita abrir numa agenda vazia
+  // quando a venda está em outra unidade.
+  const upcoming = [...reservationsCache]
+    .filter((reservation) => ['pending', 'confirmed', 'checked_in'].includes(reservation.status))
+    .sort((a, b) => a.checkin.localeCompare(b.checkin))[0];
+  state.unit =
+    state.units.find((unit) => unit.id === state.unit?.id) ??
+    state.units.find((unit) => unit.id === upcoming?.unitId) ??
+    state.units[0] ??
+    null;
 }
 
 async function loadAvailability() {
@@ -441,8 +454,10 @@ async function loadIcalSources() {
 }
 
 async function boot() {
+  reservationsCache = await api('/v1/reservations?limit=100').catch(() => []);
   await loadStructure();
   await loadWorkspace();
+  reservationsCache = state.reservations;
   state.calStart = iso(new Date());
   await loadAvailability();
   renderShell();
@@ -499,8 +514,21 @@ async function renderDashboard() {
     .slice(0, 5);
 
   const soldOut = next30.filter((day) => day.available === 0).length;
-  const priced = next30.filter((day) => day.rateCents);
-  const adr = priced.length ? priced.reduce((sum, day) => sum + day.rateCents, 0) / priced.length : 0;
+  // Diária média = receita das reservas ÷ noites vendidas no período.
+  // Usar a tarifa anunciada daria um número que nunca foi praticado.
+  const windowed = state.reservations.filter(
+    (reservation) =>
+      reservation.status !== 'cancelled' &&
+      reservation.checkin >= today &&
+      reservation.checkin <= addDays(today, 30),
+  );
+  const windowedNights = windowed.reduce(
+    (sum, reservation) => sum + nights(reservation.checkin, reservation.checkout),
+    0,
+  );
+  const adr = windowedNights
+    ? windowed.reduce((sum, reservation) => sum + reservation.totalCents, 0) / windowedNights
+    : 0;
 
   const attention = [];
   if (state.summary?.outbox?.dead > 0)
@@ -545,9 +573,9 @@ async function renderDashboard() {
           <div class="d">${plural(state.summary?.activeReservations ?? 0, 'reserva ativa', 'reservas ativas')} · líquido ${brl(state.summary?.netCents ?? 0)}</div>
         </div>
         <div class="kpi">
-          <div class="l">Diária média</div>
+          <div class="l">Diária média vendida</div>
           <div class="n">${brl(adr)}</div>
-          <div class="d">próximos 30 dias</div>
+          <div class="d">${plural(windowed.length, 'reserva', 'reservas')} nos próximos 30 dias</div>
         </div>
         <div class="kpi ${soldOut > 0 ? 'danger' : ''}">
           <div class="l">Noites esgotadas</div>
@@ -559,7 +587,7 @@ async function renderDashboard() {
       <div class="split">
         <div class="card">
           <div class="card-head">
-            <div><h2>Ocupação dos próximos 30 dias</h2><div class="sub">${state.unit?.name ?? '—'} · barra cheia = noite vendida</div></div>
+            <div><h2>Ocupação dos próximos 30 dias</h2><div class="sub">todas as unidades · preenchimento = proporção vendida no dia</div></div>
             <a class="link-btn" href="#" id="goCalendar">abrir calendário →</a>
           </div>
           <div class="card-body">
@@ -693,7 +721,7 @@ async function renderCalendar() {
 
       <div class="card">
         <div class="card-head">
-          <div><h2>${state.unit.name}</h2><div class="sub">preço, disponibilidade e bloqueios</div></div>
+          <div><h2>${state.unit.name}</h2><div class="sub">${fmtFull(days[0]?.date)} → ${fmtFull(days[days.length - 1]?.date)} · preço, disponibilidade e bloqueios</div></div>
           <div class="legend">
             <span><span class="swatch" style="background:#fff"></span>livre</span>
             <span><span class="swatch" style="background:#fdf4f3;border-color:#f0d9d6"></span>reservado</span>
@@ -727,8 +755,9 @@ async function renderCalendar() {
       : day.available === 0
         ? 'reservado'
         : `${day.available} livre${day.available > 1 ? 's' : ''}`;
+    const isFirstOfMonth = day.date.endsWith('-01');
     const cell = el(`<div class="${cls.join(' ')}" title="${fmtFull(day.date)}">
-      <span class="d">${fmtDate(day.date)}</span>
+      <span class="d">${isFirstOfMonth ? `${MONTHS[Number(day.date.slice(5, 7)) - 1]} 01` : fmtDate(day.date)}${day.date === today ? ' · hoje' : ''}</span>
       <span class="p">${day.rateCents ? brl(day.rateCents) : '—'}</span>
       <span class="a">${status}</span>
       ${day.reserved ? '<span class="bar"></span>' : ''}
